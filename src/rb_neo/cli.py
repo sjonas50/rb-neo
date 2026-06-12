@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import typer
 
 from . import agent, recommend
 from .config import get_settings
-from .db import Neo4jDB
+from .db import Neo4jDB, Neo4jUnavailable
 from .ingest import load_from_dir
 from .logging import configure_logging, get_logger
 from .synthetic import PROFILES, seed_learners
 
 app = typer.Typer(help="rb-neo: early-reading knowledge-graph PoC", no_args_is_help=True)
 log = get_logger()
+
+
+@contextmanager
+def db_session() -> Iterator[Neo4jDB]:
+    """Yield a connected DB, exiting cleanly with a hint if it is unreachable."""
+    try:
+        with Neo4jDB() as db:
+            yield db
+    except Neo4jUnavailable as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from exc
 
 
 @app.callback()
@@ -24,7 +38,7 @@ def _main() -> None:
 @app.command()
 def init() -> None:
     """Apply schema constraints and indexes (idempotent)."""
-    with Neo4jDB() as db:
+    with db_session() as db:
         db.apply_schema()
     typer.echo("Schema applied.")
 
@@ -36,7 +50,7 @@ def ingest(
 ) -> None:
     """Parse and load word files into the graph."""
     settings = get_settings()
-    with Neo4jDB(settings) as db:
+    with db_session() as db:
         summary = load_from_dir(
             db, settings.rb_words_dir, limit=limit or None, batch_size=batch_size
         )
@@ -49,7 +63,7 @@ def ingest(
 @app.command()
 def synth() -> None:
     """Create synthetic learners with attempt history + computed mastery."""
-    with Neo4jDB() as db:
+    with db_session() as db:
         learners = seed_learners(db)
         for learner in learners:
             s = recommend.mastery_summary(db, learner.id)
@@ -72,7 +86,7 @@ def demo(
 ) -> None:
     """Run the recommender scenarios for one or all learners."""
     ids = [learner] if learner else [p.learner.id for p in PROFILES]
-    with Neo4jDB() as db:
+    with db_session() as db:
         for lid in ids:
             s = recommend.mastery_summary(db, lid)
             if not s:
@@ -80,8 +94,7 @@ def demo(
                 continue
             typer.echo(f"\n{'=' * 60}")
             typer.echo(
-                f"{s['name']}  [{s['level']}]  "
-                f"{s['mastered']}/{s['skills']} graphemes mastered"
+                f"{s['name']}  [{s['level']}]  {s['mastered']}/{s['skills']} graphemes mastered"
             )
             typer.echo("=" * 60)
 
@@ -125,7 +138,7 @@ def explain(
     learner: str = typer.Option("ava", help="Learner id to generate guidance for."),
 ) -> None:
     """Generate a structured teacher recommendation (LLM if configured, else offline)."""
-    with Neo4jDB() as db:
+    with db_session() as db:
         rec = agent.explain(db, learner)
     typer.echo(f"Target skill : {rec.target_skill}")
     typer.echo(f"Practice words: {', '.join(rec.words) if rec.words else '(none)'}")
@@ -141,7 +154,7 @@ def reset(
     """Delete ALL nodes and relationships (destructive)."""
     if not yes:
         typer.confirm("Delete the entire graph?", abort=True)
-    with Neo4jDB() as db:
+    with db_session() as db:
         db.reset()
     typer.echo("Graph reset.")
 

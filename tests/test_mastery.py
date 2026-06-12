@@ -47,9 +47,9 @@ def test_compute_mastery_multiskill() -> None:
         "cat": [("c", "letter"), ("a", "letter"), ("t", "letter")],
         "cot": [("c", "letter"), ("o", "letter"), ("t", "letter")],
     }
-    attempts = [
-        Attempt(word="cat", correct=True, ts=1000 + i * 86400) for i in range(5)
-    ] + [Attempt(word="cot", correct=True, ts=1000 + (5 + i) * 86400) for i in range(5)]
+    attempts = [Attempt(word="cat", correct=True, ts=1000 + i * 86400) for i in range(5)] + [
+        Attempt(word="cot", correct=True, ts=1000 + (5 + i) * 86400) for i in range(5)
+    ]
 
     estimates = {e.skill: e for e in compute_mastery(attempts, word_graphemes)}
     assert {"c", "a", "t", "o"} <= set(estimates)

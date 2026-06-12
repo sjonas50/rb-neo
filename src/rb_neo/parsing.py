@@ -17,8 +17,21 @@ from .models import ChunkUnit, GraphemeUnit, PhonemeUnit, WordRecord
 
 VOWEL_PHONEMES: frozenset[str] = frozenset(
     {
-        "aa", "ae", "ah", "ao", "aw", "ay", "eh", "er",
-        "ey", "ih", "iy", "ow", "oy", "uh", "uw",
+        "aa",
+        "ae",
+        "ah",
+        "ao",
+        "aw",
+        "ay",
+        "eh",
+        "er",
+        "ey",
+        "ih",
+        "iy",
+        "ow",
+        "oy",
+        "uh",
+        "uw",
     }
 )
 
@@ -32,15 +45,47 @@ R_CONTROLLED: frozenset[str] = frozenset(
 )
 VOWEL_TEAMS: frozenset[str] = frozenset(
     {
-        "ai", "ay", "ea", "ee", "ei", "ey", "ie", "oa", "oe", "oo",
-        "ou", "ow", "oi", "oy", "au", "aw", "ue", "ui", "eu", "igh",
+        "ai",
+        "ay",
+        "ea",
+        "ee",
+        "ei",
+        "ey",
+        "ie",
+        "oa",
+        "oe",
+        "oo",
+        "ou",
+        "ow",
+        "oi",
+        "oy",
+        "au",
+        "aw",
+        "ue",
+        "ui",
+        "eu",
+        "igh",
     }
 )
 # Common morphographic chunks (suffixes / spelling-of-meaning units).
 MORPHEMES: frozenset[str] = frozenset(
     {
-        "ing", "tion", "sion", "ed", "est", "ly", "ness", "ment",
-        "ful", "less", "ous", "age", "able", "ible", "cious", "tious",
+        "ing",
+        "tion",
+        "sion",
+        "ed",
+        "est",
+        "ly",
+        "ness",
+        "ment",
+        "ful",
+        "less",
+        "ous",
+        "age",
+        "able",
+        "ible",
+        "cious",
+        "tious",
     }
 )
 

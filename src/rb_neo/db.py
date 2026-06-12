@@ -7,11 +7,17 @@ from types import TracebackType
 from typing import Any
 
 from neo4j import Driver, GraphDatabase
+from neo4j.exceptions import AuthError, ServiceUnavailable
 
 from .config import Settings, get_settings
 from .logging import get_logger
 
 log = get_logger()
+
+
+class Neo4jUnavailable(RuntimeError):
+    """Raised when the database cannot be reached or authentication fails."""
+
 
 # Uniqueness constraints: (label, property). Creating a constraint also creates a
 # backing index, which keeps the idempotent MERGEs in the ingester fast.
@@ -47,7 +53,17 @@ class Neo4jDB:
             # notices when MERGE-ing two uniquely-keyed nodes).
             notifications_min_severity="WARNING",
         )
-        self._driver.verify_connectivity()
+        try:
+            self._driver.verify_connectivity()
+        except (ServiceUnavailable, OSError) as exc:
+            raise Neo4jUnavailable(
+                f"Cannot reach Neo4j at {self.settings.neo4j_uri}. "
+                "Is it running? Try `docker compose up -d`."
+            ) from exc
+        except AuthError as exc:
+            raise Neo4jUnavailable(
+                "Neo4j authentication failed. Check NEO4J_USER / NEO4J_PASSWORD in .env."
+            ) from exc
         return self
 
     def __exit__(
