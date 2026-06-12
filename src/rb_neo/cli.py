@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from . import recommend
+from . import agent, recommend
 from .config import get_settings
 from .db import Neo4jDB
 from .ingest import load_from_dir
@@ -118,6 +118,20 @@ def demo(
                 typer.echo(f"Minimal pairs of '{w}':")
                 _print_rows(recommend.minimal_pairs(db, w, limit=10), "word")
     typer.echo("")
+
+
+@app.command()
+def explain(
+    learner: str = typer.Option("ava", help="Learner id to generate guidance for."),
+) -> None:
+    """Generate a structured teacher recommendation (LLM if configured, else offline)."""
+    with Neo4jDB() as db:
+        rec = agent.explain(db, learner)
+    typer.echo(f"Target skill : {rec.target_skill}")
+    typer.echo(f"Practice words: {', '.join(rec.words) if rec.words else '(none)'}")
+    typer.echo(f"Rationale    : {rec.rationale}")
+    if rec.decodable_sentence:
+        typer.echo(f"Sentence     : {rec.decodable_sentence}")
 
 
 @app.command()
