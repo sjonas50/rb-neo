@@ -109,6 +109,30 @@ def test_common_only_restricts_to_curated_words(seeded) -> None:
 
 
 @requires_neo4j
+def test_traverse_decision_and_ripple(seeded) -> None:
+    from rb_neo import traverse
+
+    db = seeded
+    s2 = traverse.step_decision(db, "ava", "Ava")
+    assert s2.rows, "expected candidate words"
+    target = s2.extra["target"]
+    assert target and s2.dot.startswith("digraph")
+    # Every accepted word's only unmastered grapheme is the target.
+    for w in s2.extra["accepted"]:
+        unmastered = db.query(
+            "MATCH (l:Learner {id:'ava'}), (x:Word {text:$wt})-[:HAS_GRAPHEME]->(g:Grapheme) "
+            "WHERE NOT (l)-[:MASTERED {mastered:true}]->(g) "
+            "RETURN collect(DISTINCT g.text) AS u",
+            wt=w,
+        )[0]["u"]
+        assert unmastered == [target]
+
+    s3 = traverse.step_ripple(db, "ava", "Ava", target)
+    assert s3.extra["unlocked"], "learning the target should unlock words"
+    assert s3.extra["after"] >= s3.extra["before"]
+
+
+@requires_neo4j
 def test_viz_html_builds(seeded) -> None:
     pytest.importorskip("pyvis")
     from rb_neo import viz

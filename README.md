@@ -39,19 +39,24 @@ An investor-facing Streamlit dashboard that makes the value concrete: **the grap
 guarantees what's safe to teach; the LLM makes it personal.**
 
 ```bash
-uv pip install -e ".[showcase]"                # adds streamlit + pyvis
+uv pip install -e ".[showcase]"                # adds streamlit (graphs via built-in Graphviz)
 export ANTHROPIC_API_KEY=sk-ant-...            # (or put it in .env) for LIVE lessons
 uv run rb-neo ingest --sample 30000            # broad corpus so common words appear
 uv run rb-neo synth                            # 4 synthetic kids with interests
 uv run streamlit run app/streamlit_app.py      # open http://localhost:8501
 ```
 
-Three tabs:
-- **👧 Student dashboard** — pick a child; the graph picks the next target skill and the
-  guaranteed-decodable practice words; click *Generate* for a live, interest-themed lesson.
-- **🆚 Same skill, two kids** — the money shot: identical graph-computed safe words for two
-  children → two different Claude-written lessons (e.g. soccer vs. space).
-- **🕸️ The graph** — watch words share letters and sounds, with a learner's mastery overlaid.
+Two tabs:
+- **🎯 Watch the graph decide** — a guided traversal where the recommendation is computed
+  *on the graph*, with the **real Cypher shown at every step**:
+  1. what the graph knows about the child (mastered graphemes),
+  2. the graph evaluates every candidate word and picks the next skill — the rule is
+     *visible* (accepted = exactly one new red letter; rejected words show why),
+  3. the child masters that one grapheme → the graph **ripples** out to unlock a wave of
+     newly-decodable words (before/after count),
+  4. the LLM writes a personalized lesson from the graph-guaranteed safe set.
+- **🆚 Same skill, two kids** — identical graph-computed safe words for two children →
+  two different Claude-written lessons (e.g. soccer vs. space).
 
 > Without `ANTHROPIC_API_KEY`, lessons show a deterministic offline preview so the app still
 > runs (good for screenshots); set the key for live generation. Only synthetic data is sent.

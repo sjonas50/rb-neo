@@ -1,63 +1,63 @@
 """rb-neo showcase — investor-facing Streamlit dashboard.
 
-Tells one story: **the graph guarantees what's safe to teach (deterministic,
-decodable); the LLM makes it personal (a story themed to this child).**
+The hero is a guided **graph traversal**: the recommendation is computed *on the
+graph*, in front of you, with the real Cypher shown at every step —
+  1. what the graph knows about the child,
+  2. the graph evaluates candidates and picks the next skill (the rule is visible),
+  3. learning that one skill ripples out to unlock a wave of new words,
+  4. the LLM writes a personalized lesson from the graph-guaranteed safe set.
 
 Run:
     uv pip install -e ".[showcase]"
+    export ANTHROPIC_API_KEY=sk-ant-...        # for live lessons (else offline preview)
+    uv run rb-neo ingest --sample 30000 && uv run rb-neo synth
     uv run streamlit run app/streamlit_app.py
-
-Expects the graph to be seeded first:
-    uv run rb-neo ingest --sample 30000
-    uv run rb-neo synth
 """
 
 from __future__ import annotations
 
-import collections
-
 import streamlit as st
-import streamlit.components.v1 as components
 
-from rb_neo import agent, recommend, viz
+from rb_neo import agent, recommend, traverse
 from rb_neo.config import get_settings
 from rb_neo.db import Neo4jDB, Neo4jUnavailable
 
-st.set_page_config(page_title="rb-neo — personalized early reading", page_icon="📚", layout="wide")
+st.set_page_config(
+    page_title="rb-neo — reading on a knowledge graph", page_icon="📚", layout="wide"
+)
+
+LEGEND = (
+    "🟩 grapheme **mastered** · 🟥 the **one new** grapheme · 🟧 another not-yet grapheme · "
+    "□ word (green=next-best · grey=already known · red=too hard)"
+)
 
 
 @st.cache_resource
 def get_db() -> Neo4jDB:
-    """Open and cache a Neo4j connection for the session."""
     db = Neo4jDB()
     db.__enter__()
     return db
 
 
 @st.cache_data(ttl=30)
-def graph_stats() -> dict:
+def stats() -> dict:
     db = get_db()
-    q = "MATCH (w:Word) RETURN count(w) AS n"
-    counts = {
-        "words": db.query(q)[0]["n"],
+    return {
+        "words": db.query("MATCH (w:Word) RETURN count(w) AS n")[0]["n"],
         "graphemes": db.query("MATCH (g:Grapheme) RETURN count(g) AS n")[0]["n"],
         "sounds": db.query("MATCH (s:Sound) RETURN count(s) AS n")[0]["n"],
         "phonemes": db.query("MATCH (p:Phoneme) RETURN count(p) AS n")[0]["n"],
     }
-    return counts
 
 
 def learner_options(db: Neo4jDB) -> dict[str, dict]:
     return {f"{ln['emoji']} {ln['name']} ({ln['level']})": ln for ln in recommend.list_learners(db)}
 
 
-def top_target(db: Neo4jDB, learner_id: str) -> str | None:
-    """The most reinforceable next grapheme for a learner (graph-chosen)."""
-    nbw = recommend.next_best_word(db, learner_id, limit=25)
-    if not nbw:
-        return None
-    counts = collections.Counter(r["introduces"] for r in nbw)
-    return counts.most_common(1)[0][0]
+def cypher_block(step: traverse.Step) -> None:
+    with st.expander("🔎 The Cypher that ran (one traversal — not app logic)", expanded=True):
+        st.code(step.cypher, language="cypher")
+        st.caption(f"params: `{step.params}`")
 
 
 def persona_card(learner: dict, summary: dict) -> None:
@@ -68,129 +68,140 @@ def persona_card(learner: dict, summary: dict) -> None:
     st.progress(mastered / skills, text=f"{mastered}/{skills} graphemes mastered")
 
 
-def render_lesson(db: Neo4jDB, learner_id: str, target: str, words: list[str]) -> None:
-    lesson = agent.generate_lesson(db, learner_id, target, words)
-    st.markdown(f"**📖 {lesson.title}**")
-    st.write(lesson.story)
-    if lesson.words_used:
-        st.caption("Words used: " + ", ".join(lesson.words_used))
-    st.info(f"👩‍🏫 {lesson.teacher_note}", icon="🧩")
-
-
-# ── connection ────────────────────────────────────────────────────────────────
+# ── connect ───────────────────────────────────────────────────────────────────
 try:
     db = get_db()
     learners = learner_options(db)
 except Neo4jUnavailable as exc:
     st.error(str(exc))
     st.stop()
-
 if not learners:
-    st.warning("No learners found. Run `uv run rb-neo ingest --sample 30000` then `rb-neo synth`.")
+    st.warning("No learners. Run `uv run rb-neo ingest --sample 30000` then `rb-neo synth`.")
     st.stop()
 
 settings = get_settings()
 live = bool(settings.anthropic_api_key)
 
 # ── header ────────────────────────────────────────────────────────────────────
-st.title("📚 Personalized Early Reading — on a Knowledge Graph")
-st.markdown("#### The graph guarantees what's *safe* to teach. The LLM makes it *personal.*")
-s = graph_stats()
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Words", f"{s['words']:,}")
-c2.metric("Distinct graphemes", s["graphemes"])
-c3.metric("Distinct sounds", s["sounds"])
-c4.metric("Distinct phonemes", s["phonemes"])
-_llm_status = (
-    "🟢 Live Claude generation ON."
-    if live
-    else "🟡 No ANTHROPIC_API_KEY — lessons show an offline preview."
-)
+st.title("📚 Reading Personalization — *Watch the Knowledge Graph Decide*")
+s = stats()
+cols = st.columns(4)
+cols[0].metric("Words in graph", f"{s['words']:,}")
+cols[1].metric("Graphemes", s["graphemes"])
+cols[2].metric("Shared sounds", s["sounds"])
+cols[3].metric("Phonemes", s["phonemes"])
 st.caption(
-    f"~{s['words']:,} words decode to just {s['sounds']} shared sounds and {s['phonemes']} "
-    f"phonemes — that reuse is why a graph fits. {_llm_status}"
+    f"{s['words']:,} words collapse to {s['sounds']} shared sounds & {s['phonemes']} phonemes — "
+    "that reuse is the engine below. "
+    + ("🟢 Live Claude lessons." if live else "🟡 No ANTHROPIC_API_KEY — offline lesson preview.")
 )
 
-tab_dash, tab_split, tab_graph = st.tabs(
-    ["👧 Student dashboard", "🆚 Same skill, two kids", "🕸️ The graph"]
-)
+tab_flow, tab_split = st.tabs(["🎯 Watch the graph decide", "🆚 Same skill, two kids"])
 
-# ── Tab 1: single student dashboard ───────────────────────────────────────────
-with tab_dash:
-    label = st.selectbox("Student", list(learners), key="dash_student")
+# ── TAB 1: the guided traversal ───────────────────────────────────────────────
+with tab_flow:
+    label = st.selectbox("Student", list(learners), key="flow_student")
     learner = learners[label]
-    lid = learner["id"]
-    summary = recommend.mastery_summary(db, lid)
+    lid, lname = learner["id"], learner["name"]
 
-    left, right = st.columns([1, 2])
-    with left:
-        persona_card(learner, summary)
+    # progressive reveal, reset when the student changes
+    if st.session_state.get("flow_for") != lid:
+        st.session_state.flow_for = lid
+        st.session_state.step = 1
 
-    with right:
-        target = top_target(db, lid)
-        if not target:
-            st.success("This learner can decode every available word — move to fluency practice.")
+    bcols = st.columns([1, 1, 6])
+    if bcols[0].button("▶ Next step", type="primary"):
+        st.session_state.step = min(4, st.session_state.get("step", 1) + 1)
+    if bcols[1].button("↺ Restart"):
+        st.session_state.step = 1
+    step = st.session_state.get("step", 1)
+    st.caption(LEGEND)
+
+    # Step 1 — learner state
+    st.markdown("#### 1 · What the graph knows about this child")
+    s1 = traverse.step_learner_state(db, lid, lname)
+    st.graphviz_chart(s1.dot, use_container_width=True)
+    st.info(s1.note)
+    cypher_block(s1)
+
+    # Step 2 — the decision
+    if step >= 2:
+        st.divider()
+        st.markdown("#### 2 · The graph evaluates every candidate word and picks the next skill")
+        s2 = traverse.step_decision(db, lid, lname)
+        if not s2.rows:
+            st.success(s2.note)
+            target = None
         else:
-            words = [r["word"] for r in recommend.cross_word(db, lid, target, limit=8)]
-            st.markdown("##### 🔵 GRAPH — *deterministic, guaranteed decodable*")
-            st.markdown(f"Next target skill: **`{target}`**")
-            st.markdown("Safe practice words (every other letter already mastered):")
-            st.markdown(" ".join(f"`{w}`" for w in words) or "_none_")
+            target = s2.extra["target"]
+            st.graphviz_chart(s2.dot, use_container_width=True)
+            st.markdown(s2.note)
+            st.caption(
+                f"✅ accepted (1 new = `{target}`): {', '.join(s2.extra['accepted'])} · "
+                f"⏭️ already known: {', '.join(s2.extra['known'])} · "
+                f"🚫 too hard (2+ new): {', '.join(s2.extra['hard'])}"
+            )
+            cypher_block(s2)
+        st.session_state.flow_target = target
+    else:
+        st.caption("➡️ Press **Next step** to watch the graph choose what to teach.")
 
-            st.markdown("##### 🟢 LLM — *personalized within that safe set*")
-            if st.button("✨ Generate personalized lesson", key="dash_gen", type="primary"):
-                with st.spinner("Writing a lesson just for this child…"):
-                    render_lesson(db, lid, target, words)
+    # Step 3 — the ripple
+    target = st.session_state.get("flow_target")
+    if step >= 3 and target:
+        st.divider()
+        st.markdown(f"#### 3 · {lname} masters **`{target}`** — watch the graph unlock new words")
+        s3 = traverse.step_ripple(db, lid, lname, target)
+        m1, m2 = st.columns(2)
+        m1.metric("Decodable words before", s3.extra["before"])
+        m2.metric("Decodable words after", s3.extra["after"], delta=f"+{len(s3.extra['unlocked'])}")
+        st.graphviz_chart(s3.dot, use_container_width=True)
+        st.success(s3.note)
+        cypher_block(s3)
+        st.session_state.flow_unlocked = s3.extra["unlocked"]
 
-    with st.expander("🕸️ See the graph: these words → shared letters & sounds (mastery overlaid)"):
-        if target:
-            html = viz.build_word_graph_html(db, words, learner_id=lid, height="420px")
-            st.caption(viz.legend_markdown(personalized=True))
-            components.html(html, height=440)
+    # Step 4 — the LLM lesson
+    if step >= 4 and target:
+        st.divider()
+        st.markdown("#### 4 · The LLM writes a personalized lesson — *from the graph's safe set*")
+        words = st.session_state.get("flow_unlocked", [])[:8]
+        st.markdown("Graph-guaranteed safe words: " + " ".join(f"`{w}`" for w in words))
+        st.caption("The LLM may only theme a story around these — it cannot go off-curriculum.")
+        with st.spinner(f"Writing a {learner['interests'][0]} story for {lname}…"):
+            lesson = agent.generate_lesson(db, lid, target, words)
+        st.markdown(f"**📖 {lesson.title}**")
+        st.write(lesson.story)
+        st.info(f"👩‍🏫 {lesson.teacher_note}")
 
-# ── Tab 2: split-screen (the money shot) ──────────────────────────────────────
+# ── TAB 2: split-screen personalization ───────────────────────────────────────
 with tab_split:
     st.markdown(
-        "Same target skill. **Identical** graph-computed safe words. "
-        "Two children → two different lessons. *That's the whole idea.*"
+        "Same target skill. **Identical** graph-computed safe words. Two children → two "
+        "different lessons. The graph guarantees safety; the LLM personalizes within it."
     )
     skill = st.selectbox("Target skill (digraph)", ["sh", "ch", "th", "ck"], key="split_skill")
-
     names = list(learners)
     cc = st.columns(2)
-    pick_a = cc[0].selectbox("Left student", names, index=min(2, len(names) - 1), key="split_a")
-    pick_b = cc[1].selectbox("Right student", names, index=min(3, len(names) - 1), key="split_b")
-    la, lb = learners[pick_a], learners[pick_b]
+    pa = cc[0].selectbox("Left", names, index=min(1, len(names) - 1), key="split_a")
+    pb = cc[1].selectbox("Right", names, index=min(2, len(names) - 1), key="split_b")
+    la, lb = learners[pa], learners[pb]
+    wa = [r["word"] for r in recommend.cross_word(db, la["id"], skill, limit=8)]
+    wb = [r["word"] for r in recommend.cross_word(db, lb["id"], skill, limit=8)]
 
-    words_a = [r["word"] for r in recommend.cross_word(db, la["id"], skill, limit=8)]
-    words_b = [r["word"] for r in recommend.cross_word(db, lb["id"], skill, limit=8)]
+    if wa and wa == wb:
+        st.success("✅ Identical safe set (graph-guaranteed): " + " ".join(f"`{w}`" for w in wa))
+    elif wa and wb:
+        st.warning("Safe sets differ — the two children aren't at the same mastery for this skill.")
 
-    if words_a and words_a == words_b:
-        st.success(
-            "✅ Identical safe set for both — the graph guarantees decodability: "
-            + " ".join(f"`{w}`" for w in words_a)
-        )
-    else:
-        st.warning("Safe sets differ (the two students aren't at the same mastery for this skill).")
-
-    gen = st.button("✨ Generate both lessons", key="split_gen", type="primary")
-    col_a, col_b = st.columns(2)
-    for col, learner_, words_ in ((col_a, la, words_a), (col_b, lb, words_b)):
+    gen = st.button("✨ Generate both lessons", type="primary", key="split_gen")
+    g1, g2 = st.columns(2)
+    for col, who, words in ((g1, la, wa), (g2, lb, wb)):
         with col:
-            persona_card(learner_, recommend.mastery_summary(db, learner_["id"]))
-            st.markdown(" ".join(f"`{w}`" for w in words_) or "_no safe words_")
-            if gen and words_:
-                with st.spinner(f"Writing for {learner_['name']}…"):
-                    render_lesson(db, learner_["id"], skill, words_)
-
-# ── Tab 3: the graph ──────────────────────────────────────────────────────────
-with tab_graph:
-    st.markdown("Pick words and watch them share letters and sounds. Overlay a student's mastery.")
-    sample_words = [r["word"] for r in recommend.mastery_aware(db, "ben", limit=30)][:12]
-    chosen = st.multiselect("Words", sample_words, default=sample_words[:6])
-    overlay = st.selectbox("Mastery overlay", ["(none)"] + list(learners), key="graph_overlay")
-    lid = learners[overlay]["id"] if overlay != "(none)" else None
-    if chosen:
-        html = viz.build_word_graph_html(db, chosen, learner_id=lid, height="560px")
-        st.caption(viz.legend_markdown(personalized=lid is not None))
-        components.html(html, height=580)
+            persona_card(who, recommend.mastery_summary(db, who["id"]))
+            st.markdown(" ".join(f"`{w}`" for w in words) or "_no safe words_")
+            if gen and words:
+                with st.spinner(f"Writing for {who['name']}…"):
+                    lesson = agent.generate_lesson(db, who["id"], skill, words)
+                st.markdown(f"**📖 {lesson.title}**")
+                st.write(lesson.story)
+                st.info(f"👩‍🏫 {lesson.teacher_note}")
