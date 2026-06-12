@@ -24,7 +24,7 @@ uv run ruff check src && uv run ruff format src
   ~170 graphemes are reused across 190k words (~445× avg). MERGE-on-key keeps them singletons.
 - **Routing is deterministic Cypher, not an LLM.** "Next skill whose prerequisites are mastered" and
   "next-best-word (reuse mastered units, introduce ≤1 new grapheme)" are graph queries. The LLM
-  (Claude Haiku 4.5, Phase 4) only narrates/generates content.
+  (Claude Sonnet 4.6 by default; Haiku 4.5 for cheaper scale — Phase 4) only narrates/generates content.
 - **Mastery = pyBKT per skill node**, with an exponential decay fallback before fit. DKT only at scale.
 - **Derived edges** computed at ingest: `Rime` nodes (not pairwise RHYMES_WITH) and `MINIMAL_PAIR_OF`
   via phoneme-wildcard hashing (O(n·L), not O(n²)).

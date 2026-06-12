@@ -87,8 +87,9 @@ Three tabs:
 | **Review queue** | weakest mastered skills (closest to slipping) | spaced-repetition-lite |
 | **Rhyme family / minimal pairs** | shared `Rime` / one-phoneme-apart | phonological awareness |
 
-Routing is **deterministic graph logic** — the optional LLM layer (`agent.py`, Claude Haiku
-4.5) only narrates the choice and generates a decodable sentence; it never decides what to teach.
+Routing is **deterministic graph logic** — the optional LLM layer (`agent.py`, Claude Sonnet
+4.6 by default) only narrates the choice and generates a decodable sentence; it never decides
+what to teach.
 
 ## Architecture decisions (PoC pragmatism)
 

@@ -18,7 +18,9 @@ class Settings(BaseSettings):
 
     # Optional LLM layer (Phase 4). Unset key -> deterministic offline fallback.
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-haiku-4-5"
+    # Sonnet 4.6 by default for richer showcase lessons; set ANTHROPIC_MODEL=claude-haiku-4-5
+    # to trade some quality for lower cost/latency at classroom scale.
+    anthropic_model: str = "claude-sonnet-4-6"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
