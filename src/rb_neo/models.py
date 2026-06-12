@@ -96,3 +96,6 @@ class Learner(BaseModel):
     id: str
     name: str
     level: str  # e.g. "beginner" | "mid" | "advanced"
+    age: int = 6
+    emoji: str = "🧒"
+    interests: list[str] = Field(default_factory=list)  # what the LLM personalizes around

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from rb_neo import recommend
-from rb_neo.ingest import load_from_dir
+from rb_neo.ingest import ensure_common_words, load_from_dir
 from rb_neo.synthetic import seed_learners
 
 from .conftest import requires_neo4j
@@ -26,6 +26,7 @@ pytestmark = pytest.mark.skipif(
 def seeded(db):
     """Ingest a slice of the corpus and seed synthetic learners."""
     load_from_dir(db, WORDS_DIR, limit=4000)
+    ensure_common_words(db, WORDS_DIR)
     seed_learners(db)
     return db
 

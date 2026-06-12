@@ -100,9 +100,23 @@ class Neo4jDB:
         log.info("schema.applied", constraints=len(CONSTRAINTS), indexes=len(INDEXES))
 
     def reset(self) -> None:
-        """Delete all nodes/relationships. Destructive — PoC convenience only."""
+        """Delete all nodes/relationships. Destructive — PoC convenience only.
+
+        Uses auto-commit (required by ``CALL { } IN TRANSACTIONS``) and consumes
+        the result so the batched delete actually runs to completion — important
+        once the graph is large enough that a single-transaction delete would
+        exhaust the server's memory pool.
+        """
         with self.driver.session() as session:
-            session.run("MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS")
+            # Relationships first (uniform batches) so deleting a high-degree
+            # shared node — a grapheme linked to thousands of words — never drags
+            # millions of rels into one transaction.
+            session.run(
+                "MATCH ()-[r]->() CALL (r) { DELETE r } IN TRANSACTIONS OF 10000 ROWS"
+            ).consume()
+            session.run(
+                "MATCH (n) CALL (n) { DELETE n } IN TRANSACTIONS OF 10000 ROWS"
+            ).consume()
         log.warning("db.reset", message="all nodes deleted")
 
     # -- helpers ----------------------------------------------------------------

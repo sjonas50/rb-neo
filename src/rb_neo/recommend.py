@@ -13,12 +13,18 @@ from __future__ import annotations
 
 from .db import Neo4jDB
 
+# "Presentable" words: real, classroom-friendly tokens (lowercase a-z, 3+ letters).
+# Inlined into the candidate queries to filter out the corpus's fragment /
+# abbreviation entries for audience-facing use.
+
 # A word is at the learner's i+1 frontier when every grapheme is mastered EXCEPT
 # exactly one new target — maximal reuse of known units, one new thing to learn.
 _NEXT_BEST_WORD = """
 MATCH (l:Learner {id: $learner_id})
 MATCH (w:Word)-[:HAS_GRAPHEME]->(g:Grapheme)
-WHERE $level IS NULL OR w.prlevel = $level
+WHERE ($level IS NULL OR w.prlevel = $level)
+  AND w.text =~ '[a-z]{3,}'
+  AND (NOT $common_only OR w.common = true)
 WITH l, w, collect(DISTINCT g) AS gs
 WITH l, w, gs,
      [x IN gs WHERE NOT (l)-[:MASTERED {mastered: true}]->(x)] AS unmastered
@@ -36,10 +42,12 @@ LIMIT $limit
 _CROSS_WORD = """
 MATCH (l:Learner {id: $learner_id}), (t:Grapheme {text: $target})
 MATCH (w:Word)-[:HAS_GRAPHEME]->(t)
-WHERE NOT EXISTS {
-  MATCH (w)-[:HAS_GRAPHEME]->(o:Grapheme)
-  WHERE o.text <> $target AND NOT (l)-[:MASTERED {mastered: true}]->(o)
-}
+WHERE w.text =~ '[a-z]{3,}'
+  AND (NOT $common_only OR w.common = true)
+  AND NOT EXISTS {
+    MATCH (w)-[:HAS_GRAPHEME]->(o:Grapheme)
+    WHERE o.text <> $target AND NOT (l)-[:MASTERED {mastered: true}]->(o)
+  }
 RETURN w.text AS word, size([(w)-[:HAS_GRAPHEME]->(x) | x]) AS units
 ORDER BY units ASC, word ASC
 LIMIT $limit
@@ -49,10 +57,12 @@ LIMIT $limit
 _MASTERY_AWARE = """
 MATCH (l:Learner {id: $learner_id})
 MATCH (w:Word)
-WHERE NOT EXISTS {
-  MATCH (w)-[:HAS_GRAPHEME]->(g:Grapheme)
-  WHERE NOT (l)-[:MASTERED {mastered: true}]->(g)
-}
+WHERE w.text =~ '[a-z]{3,}'
+  AND (NOT $common_only OR w.common = true)
+  AND NOT EXISTS {
+    MATCH (w)-[:HAS_GRAPHEME]->(g:Grapheme)
+    WHERE NOT (l)-[:MASTERED {mastered: true}]->(g)
+  }
 RETURN w.text AS word, w.prlevel AS level, size([(w)-[:HAS_GRAPHEME]->(x) | x]) AS units
 ORDER BY units ASC, word ASC
 LIMIT $limit
@@ -100,22 +110,68 @@ RETURN l.name AS name, l.level AS level,
        sum(CASE WHEN m.mastered THEN 1 ELSE 0 END) AS mastered
 """
 
+_LIST_LEARNERS = """
+MATCH (l:Learner)
+RETURN l.id AS id, l.name AS name, l.level AS level,
+       l.age AS age, l.emoji AS emoji, l.interests AS interests
+ORDER BY l.level, l.name
+"""
+
+_GET_LEARNER = """
+MATCH (l:Learner {id: $learner_id})
+RETURN l.id AS id, l.name AS name, l.level AS level,
+       l.age AS age, l.emoji AS emoji, l.interests AS interests
+"""
+
+
+def list_learners(db: Neo4jDB) -> list[dict]:
+    """All learners with their personas (for dashboards / dropdowns)."""
+    return db.query(_LIST_LEARNERS)
+
+
+def get_learner(db: Neo4jDB, learner_id: str) -> dict:
+    """One learner's persona, or ``{}`` if not found."""
+    rows = db.query(_GET_LEARNER, learner_id=learner_id)
+    return rows[0] if rows else {}
+
 
 def next_best_word(
-    db: Neo4jDB, learner_id: str, level: str | None = None, limit: int = 15
+    db: Neo4jDB,
+    learner_id: str,
+    level: str | None = None,
+    limit: int = 15,
+    common_only: bool = True,
 ) -> list[dict]:
-    """Words at the learner's i+1 frontier (introduce exactly one new grapheme)."""
-    return db.query(_NEXT_BEST_WORD, learner_id=learner_id, level=level, limit=limit)
+    """Words at the learner's i+1 frontier (introduce exactly one new grapheme).
+
+    ``common_only`` restricts to the curated decodable word list (recommended for
+    audience-facing use); set False to range over the full corpus.
+    """
+    return db.query(
+        _NEXT_BEST_WORD,
+        learner_id=learner_id,
+        level=level,
+        limit=limit,
+        common_only=common_only,
+    )
 
 
-def cross_word(db: Neo4jDB, learner_id: str, target: str, limit: int = 15) -> list[dict]:
+def cross_word(
+    db: Neo4jDB, learner_id: str, target: str, limit: int = 15, common_only: bool = True
+) -> list[dict]:
     """Decodable words to teach ``target`` (every other grapheme already mastered)."""
-    return db.query(_CROSS_WORD, learner_id=learner_id, target=target, limit=limit)
+    return db.query(
+        _CROSS_WORD, learner_id=learner_id, target=target, limit=limit, common_only=common_only
+    )
 
 
-def mastery_aware(db: Neo4jDB, learner_id: str, limit: int = 15) -> list[dict]:
+def mastery_aware(
+    db: Neo4jDB, learner_id: str, limit: int = 15, common_only: bool = True
+) -> list[dict]:
     """Fully decodable words for fluency practice."""
-    return db.query(_MASTERY_AWARE, learner_id=learner_id, limit=limit)
+    return db.query(
+        _MASTERY_AWARE, learner_id=learner_id, limit=limit, common_only=common_only
+    )
 
 
 def remediation(db: Neo4jDB, learner_id: str, limit: int = 10) -> list[dict]:

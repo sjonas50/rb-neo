@@ -10,7 +10,7 @@ import typer
 from . import agent, recommend
 from .config import get_settings
 from .db import Neo4jDB, Neo4jUnavailable
-from .ingest import load_from_dir
+from .ingest import ensure_common_words, load_from_dir
 from .logging import configure_logging, get_logger
 from .synthetic import PROFILES, seed_learners
 
@@ -46,17 +46,26 @@ def init() -> None:
 @app.command()
 def ingest(
     limit: int = typer.Option(8000, help="Max word files to load (0 = all)."),
+    sample: int = typer.Option(
+        0, help="Randomly sample N files across the whole corpus (0 = off). Use for demos."
+    ),
     batch_size: int = typer.Option(500, help="Words per write transaction."),
 ) -> None:
     """Parse and load word files into the graph."""
     settings = get_settings()
     with db_session() as db:
         summary = load_from_dir(
-            db, settings.rb_words_dir, limit=limit or None, batch_size=batch_size
+            db,
+            settings.rb_words_dir,
+            limit=limit or None,
+            sample=sample or None,
+            batch_size=batch_size,
         )
+        tagged = ensure_common_words(db, settings.rb_words_dir)
     typer.echo(
         f"Ingested {summary['words']} words "
-        f"({summary['skipped']} skipped, {summary['minimal_pairs']} minimal pairs)."
+        f"({summary['skipped']} skipped, {summary['minimal_pairs']} minimal pairs, "
+        f"{tagged} curated common words tagged)."
     )
 
 

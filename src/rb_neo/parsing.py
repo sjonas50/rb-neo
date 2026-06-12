@@ -8,6 +8,7 @@ offline without a database.
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -248,7 +249,29 @@ def parse_word_file(path: Path) -> WordRecord | None:
     )
 
 
-def iter_word_files(words_dir: str | Path, limit: int | None = None) -> list[Path]:
-    """Return sorted word file paths under ``words_dir`` (optionally capped)."""
+def iter_word_files(
+    words_dir: str | Path,
+    limit: int | None = None,
+    sample: int | None = None,
+    seed: int = 42,
+) -> list[Path]:
+    """Return word file paths under ``words_dir``.
+
+    Args:
+        words_dir: Directory of ``*.json`` files.
+        limit: Cap to the first N sorted files (alphabetical).
+        sample: If set, randomly sample N files spanning the whole corpus instead
+            of taking the alphabetical head — needed so common words (not just
+            ``a...`` words) appear. Takes precedence over ``limit``.
+        seed: Deterministic sampling seed.
+
+    Returns:
+        Sorted list of selected paths.
+    """
     paths = sorted(Path(words_dir).glob("*.json"))
-    return paths[:limit] if limit else paths
+    if sample and sample < len(paths):
+        rng = random.Random(seed)
+        paths = sorted(rng.sample(paths, sample))
+    elif limit:
+        paths = paths[:limit]
+    return paths

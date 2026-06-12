@@ -1,0 +1,56 @@
+"""A curated decodable word list for the showcase.
+
+Real early-reading programs sequence instruction over a controlled set of
+decodable words, not the entire dictionary. Tagging these as ``common`` on the
+graph lets the recommender surface recognizable classroom words (cat, ship,
+fish) instead of the corpus's many rare/proper-noun entries — while the graph's
+decodability logic stays exactly the same.
+
+Grouped by the phonics skills the showcase features.
+"""
+
+from __future__ import annotations
+
+# Short-vowel CVC words (the foundation of decodable reading).
+_CVC = [
+    "cat", "hat", "mat", "sat", "bat", "rat", "pat", "fat", "mad", "sad", "bad", "dad",
+    "ham", "jam", "ram", "cap", "map", "tap", "nap", "lap", "can", "man", "pan", "ran",
+    "fan", "bag", "rag", "tag", "wag", "bed", "red", "led", "hen", "pen", "ten", "net",
+    "jet", "wet", "pet", "leg", "beg", "big", "dig", "fig", "pig", "wig", "bit", "fit",
+    "hit", "sit", "pit", "lip", "hip", "rip", "tip", "win", "pin", "bin", "fin", "hot",
+    "pot", "dot", "cot", "got", "lot", "top", "mop", "hop", "cop", "dog", "log", "fog",
+    "hog", "box", "fox", "cub", "tub", "rub", "sun", "run", "bun", "fun", "nut", "cut",
+    "hut", "but", "bug", "hug", "rug", "mug", "jug", "cup", "pup",
+]
+
+# sh digraph.
+_SH = [
+    "ship", "shop", "shed", "shell", "fish", "dish", "wish", "dash", "cash", "rash",
+    "wash", "gush", "rush", "hush", "bush", "shut", "shin", "shot", "ash", "mash",
+]
+
+# ch digraph.
+_CH = [
+    "chat", "chip", "chin", "chop", "chum", "chest", "much", "such", "rich", "lunch",
+    "bench", "inch", "chick", "chess", "champ",
+]
+
+# th digraph.
+_TH = [
+    "this", "that", "then", "them", "thin", "thick", "bath", "math", "path", "with",
+    "moth", "cloth", "thump", "thug",
+]
+
+# ck ending.
+_CK = [
+    "back", "pack", "sack", "rack", "tack", "kick", "lick", "pick", "sick", "tick",
+    "lock", "rock", "sock", "duck", "luck", "tuck", "neck", "deck",
+]
+
+# Initial / final blends.
+_BLENDS = [
+    "stop", "step", "spin", "spot", "swim", "frog", "drum", "clap", "flag", "plan",
+    "glad", "slip", "trip", "grin", "crab", "snap", "stamp", "slug", "twin", "plum",
+]
+
+COMMON_WORDS: list[str] = sorted(set(_CVC + _SH + _CH + _TH + _CK + _BLENDS))

@@ -14,6 +14,7 @@ from .db import Neo4jDB, chunked
 from .logging import get_logger
 from .models import WordRecord
 from .parsing import iter_word_files, parse_word_file
+from .wordlists import COMMON_WORDS
 
 log = get_logger()
 
@@ -186,14 +187,50 @@ def derive_minimal_pairs(
     return pairs
 
 
+_TAG_COMMON = """
+UNWIND $words AS wt
+MATCH (w:Word {text: wt})
+SET w.common = true
+"""
+
+_COUNT_COMMON = "MATCH (w:Word {common: true}) RETURN count(w) AS tagged"
+
+
+def ensure_common_words(db: Neo4jDB, words_dir: str | Path) -> int:
+    """Ingest the curated decodable word files and tag them ``common = true``.
+
+    Guarantees recognizable classroom words are present and flagged regardless of
+    what the random corpus sample happened to include.
+
+    Returns:
+        The number of common words present and tagged in the graph.
+    """
+    records: list[WordRecord] = []
+    for word in COMMON_WORDS:
+        path = Path(words_dir) / f"{word}.json"
+        rec = parse_word_file(path)
+        if rec is not None:
+            records.append(rec)
+    if records:
+        ingest_words(db, records)
+    db.write(_TAG_COMMON, words=COMMON_WORDS)
+    tagged = db.query(_COUNT_COMMON)[0]["tagged"]
+    log.info("ingest.common_tagged", requested=len(COMMON_WORDS), tagged=tagged)
+    return tagged
+
+
 def load_from_dir(
-    db: Neo4jDB, words_dir: str | Path, limit: int | None = None, batch_size: int = 500
+    db: Neo4jDB,
+    words_dir: str | Path,
+    limit: int | None = None,
+    sample: int | None = None,
+    batch_size: int = 500,
 ) -> dict[str, int]:
     """Parse word files under ``words_dir`` and ingest them.
 
     Returns ingestion summary plus ``parsed``/``skipped`` file counts.
     """
-    paths = iter_word_files(words_dir, limit)
+    paths = iter_word_files(words_dir, limit=limit, sample=sample)
     records: list[WordRecord] = []
     skipped = 0
     for p in paths:

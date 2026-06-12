@@ -81,15 +81,44 @@ class Profile:
         return SEQUENCE[self.known : self.known + self.frontier]
 
 
+# Personas give the LLM something to personalize around. Ben and Maya share the
+# SAME mastery (known=27) on purpose: that makes the "same skill, two kids,
+# identical safe set, different lesson" split-screen airtight.
 PROFILES: list[Profile] = [
-    Profile(Learner(id="ava", name="Ava", level="beginner"), known=11),
-    Profile(Learner(id="ben", name="Ben", level="mid"), known=27),
-    Profile(Learner(id="cara", name="Cara", level="advanced"), known=32),
+    Profile(
+        Learner(
+            id="ava", name="Ava", level="beginner", age=5, emoji="🦕",
+            interests=["dinosaurs", "digging", "the color green"],
+        ),
+        known=11,
+    ),
+    Profile(
+        Learner(
+            id="ben", name="Ben", level="mid", age=6, emoji="⚽",
+            interests=["soccer", "his dog Rex", "pizza"],
+        ),
+        known=27,
+    ),
+    Profile(
+        Learner(
+            id="maya", name="Maya", level="mid", age=6, emoji="🚀",
+            interests=["space", "rockets", "the moon"],
+        ),
+        known=27,
+    ),
+    Profile(
+        Learner(
+            id="cara", name="Cara", level="advanced", age=7, emoji="🎨",
+            interests=["painting", "horses", "rainbows"],
+        ),
+        known=32,
+    ),
 ]
 
 _MERGE_LEARNER = """
 MERGE (l:Learner {id: $id})
-SET l.name = $name, l.level = $level
+SET l.name = $name, l.level = $level,
+    l.age = $age, l.emoji = $emoji, l.interests = $interests
 """
 
 _WORDS_FOR_GRAPHEME = """
@@ -127,7 +156,15 @@ def seed_learners(db: Neo4jDB, reps_known: int = 4, reps_frontier: int = 2) -> l
 
     for profile in PROFILES:
         learner = profile.learner
-        db.write(_MERGE_LEARNER, id=learner.id, name=learner.name, level=learner.level)
+        db.write(
+            _MERGE_LEARNER,
+            id=learner.id,
+            name=learner.name,
+            level=learner.level,
+            age=learner.age,
+            emoji=learner.emoji,
+            interests=learner.interests,
+        )
 
         rows: list[dict] = []
         ts = _BASE_TS
