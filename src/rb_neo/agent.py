@@ -190,6 +190,12 @@ def _lesson_fallback(persona: dict[str, Any], target_skill: str, words: list[str
     )
 
 
+def offline_lesson(db: Neo4jDB, learner_id: str, target_skill: str, words: list[str]) -> Lesson:
+    """Deterministic offline lesson (no network) — used as a graceful fallback."""
+    persona = recommend.get_learner(db, learner_id)
+    return _lesson_fallback(persona, target_skill, words)
+
+
 def generate_lesson(
     db: Neo4jDB,
     learner_id: str,

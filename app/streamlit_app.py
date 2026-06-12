@@ -88,6 +88,23 @@ def chip_rows(title: str, chips: list[dict], verdict_html: str) -> None:
         )
 
 
+def render_lesson(db: Neo4jDB, lid: str, target: str, words: list[str], who: str) -> None:
+    """Generate + render a lesson, falling back gracefully if the LLM call fails."""
+    try:
+        with st.spinner(f"Writing a lesson for {who}…"):
+            lesson = agent.generate_lesson(db, lid, target, words)
+    except Exception as exc:  # noqa: BLE001 — never let a live API error break the demo
+        st.warning(
+            f"Live Claude call failed ({type(exc).__name__}: {exc}). "
+            "Check ANTHROPIC_API_KEY — showing the offline preview.",
+            icon="⚠️",
+        )
+        lesson = agent.offline_lesson(db, lid, target, words)
+    st.markdown(f"**📖 {lesson.title}**")
+    st.write(lesson.story)
+    st.info(f"👩‍🏫 {lesson.teacher_note}")
+
+
 def persona_card(learner: dict, summary: dict) -> None:
     st.markdown(f"### {learner['emoji']} {learner['name']}")
     st.caption(f"Age {learner['age']} · {learner['level']}")
@@ -209,11 +226,7 @@ with tab_flow:
         words = st.session_state.get("flow_unlocked", [])[:8]
         st.markdown("Graph-guaranteed safe words: " + " ".join(f"`{w}`" for w in words))
         st.caption("The LLM may only theme a story around these — it cannot go off-curriculum.")
-        with st.spinner(f"Writing a {learner['interests'][0]} story for {lname}…"):
-            lesson = agent.generate_lesson(db, lid, target, words)
-        st.markdown(f"**📖 {lesson.title}**")
-        st.write(lesson.story)
-        st.info(f"👩‍🏫 {lesson.teacher_note}")
+        render_lesson(db, lid, target, words, lname)
 
 # ── TAB 2: split-screen personalization ───────────────────────────────────────
 with tab_split:
@@ -242,8 +255,4 @@ with tab_split:
             persona_card(who, recommend.mastery_summary(db, who["id"]))
             st.markdown(" ".join(f"`{w}`" for w in words) or "_no safe words_")
             if gen and words:
-                with st.spinner(f"Writing for {who['name']}…"):
-                    lesson = agent.generate_lesson(db, who["id"], skill, words)
-                st.markdown(f"**📖 {lesson.title}**")
-                st.write(lesson.story)
-                st.info(f"👩‍🏫 {lesson.teacher_note}")
+                render_lesson(db, who["id"], skill, words, who["name"])
