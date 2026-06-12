@@ -141,11 +141,14 @@ def _dot_ripple_tree(target: str, words: list[str]) -> str:
         "digraph G {",
         "  rankdir=LR;",
         '  bgcolor="transparent";',
-        "  ranksep=1.2;",
-        '  node [fontname="Helvetica", fontsize=14];',
-        '  edge [color="#9aa5b1", arrowsize=0.6];',
+        '  size="7,4.5";',  # bound the rendered size so it doesn't dominate the screen
+        "  ratio=compress;",
+        "  ranksep=1.0;",
+        "  nodesep=0.12;",
+        '  node [fontname="Helvetica", fontsize=13];',
+        '  edge [color="#9aa5b1", arrowsize=0.5];',
         f'  "t" [label="{_esc(target.lower())}", shape=circle, style=filled, '
-        f'fillcolor="{C_TARGET}", fontcolor="white", fontsize=22, width=1.0, fixedsize=true];',
+        f'fillcolor="{C_TARGET}", fontcolor="white", fontsize=20, width=0.9, fixedsize=true];',
     ]
     for w in words:
         lines.append(
@@ -260,7 +263,7 @@ def step_ripple(db: Neo4jDB, learner_id: str, learner_name: str, target: str) ->
         cypher=RIPPLE.strip(),
         params={"learner_id": learner_id, "target": target},
         rows=[{"word": w} for w in unlocked],
-        dot=_dot_ripple_tree(target, unlocked[:14]),
+        dot=_dot_ripple_tree(target, unlocked[:12]),
         note=f"One new grapheme — '{target}' — unlocks **{len(unlocked)} common words** in a "
         "single traversal. That network effect is why a graph beats flat storage.",
         extra={

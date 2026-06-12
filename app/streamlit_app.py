@@ -75,7 +75,7 @@ def chip_rows(title: str, chips: list[dict], verdict_html: str) -> None:
     for c in chips:
         spans = "".join(
             f'<span style="background:{_CHIP_COLOR[s][0]};color:{_CHIP_COLOR[s][1]};'
-            f'padding:3px 9px;margin:2px;border-radius:5px;font-family:monospace;'
+            f"padding:3px 9px;margin:2px;border-radius:5px;font-family:monospace;"
             f'font-weight:600;">{ltr}</span>'
             for ltr, s in c["letters"]
         )
@@ -145,10 +145,16 @@ with tab_flow:
     step = st.session_state.get("step", 1)
     st.caption(LEGEND)
 
-    # Step 1 — learner state
+    # Step 1 — learner state (compact chips, not a giant fan)
     st.markdown("#### 1 · What the graph knows about this child")
     s1 = traverse.step_learner_state(db, lid, lname)
-    st.graphviz_chart(s1.dot, use_container_width=True)
+    mastered = list(dict.fromkeys(g.lower() for g in s1.extra["mastered"]))
+    pills = "".join(
+        f'<span style="background:#2e8b57;color:white;padding:3px 9px;margin:3px;'
+        f'border-radius:5px;font-family:monospace;font-weight:600;">{g}</span>'
+        for g in mastered
+    )
+    st.markdown(f"<div>{pills}</div>", unsafe_allow_html=True)
     st.info(s1.note)
     cypher_block(s1)
 
@@ -188,7 +194,10 @@ with tab_flow:
         m1, m2 = st.columns(2)
         m1.metric("Decodable words before", s3.extra["before"])
         m2.metric("Decodable words after", s3.extra["after"], delta=f"+{len(s3.extra['unlocked'])}")
-        st.graphviz_chart(s3.dot, use_container_width=True)
+        st.graphviz_chart(s3.dot, width="content")
+        n_unlocked = len(s3.extra["unlocked"])
+        if n_unlocked > 12:
+            st.caption(f"…and {n_unlocked - 12} more (showing the first 12).")
         st.success(s3.note)
         cypher_block(s3)
         st.session_state.flow_unlocked = s3.extra["unlocked"]
