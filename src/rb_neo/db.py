@@ -43,6 +43,9 @@ class Neo4jDB:
         self._driver = GraphDatabase.driver(
             self.settings.neo4j_uri,
             auth=(self.settings.neo4j_user, self.settings.neo4j_password),
+            # Suppress INFORMATION-level notices (e.g. benign cartesian-product
+            # notices when MERGE-ing two uniquely-keyed nodes).
+            notifications_min_severity="WARNING",
         )
         self._driver.verify_connectivity()
         return self
