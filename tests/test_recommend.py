@@ -116,7 +116,7 @@ def test_traverse_decision_and_ripple(seeded) -> None:
     s2 = traverse.step_decision(db, "ava", "Ava")
     assert s2.rows, "expected candidate words"
     target = s2.extra["target"]
-    assert target and s2.dot.startswith("digraph")
+    assert target and s2.extra["chips_accepted"]
     # Every accepted word's only unmastered grapheme is the target.
     for w in s2.extra["accepted"]:
         unmastered = db.query(
@@ -130,6 +130,7 @@ def test_traverse_decision_and_ripple(seeded) -> None:
     s3 = traverse.step_ripple(db, "ava", "Ava", target)
     assert s3.extra["unlocked"], "learning the target should unlock words"
     assert s3.extra["after"] >= s3.extra["before"]
+    assert s3.dot.startswith("digraph")
 
 
 @requires_neo4j

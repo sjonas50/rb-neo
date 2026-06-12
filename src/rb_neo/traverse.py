@@ -132,54 +132,51 @@ def _esc(s: str) -> str:
     return s.replace('"', '\\"')
 
 
-def _dot(
-    learner_name: str,
-    entries: list[dict],
-    target: str | None,
-    rankdir: str = "LR",
-) -> str:
-    """Build a DOT graph: learner -> words -> shared grapheme nodes.
+def _dot_ripple_tree(target: str, words: list[str]) -> str:
+    """A clean one-to-many tree: the new grapheme as a hub, unlocked words fanning out.
 
-    Each entry: ``{"word": str, "verdict": "ok|known|hard", "graphemes": [(text, mastered)]}``.
-    Shared grapheme nodes are emitted once, so reuse is visible.
+    One-to-many means no edge crossing — it reads as "this one skill unlocked all these".
     """
     lines = [
         "digraph G {",
-        f"  rankdir={rankdir};",
+        "  rankdir=LR;",
         '  bgcolor="transparent";',
+        "  ranksep=1.2;",
         '  node [fontname="Helvetica", fontsize=14];',
-        '  edge [color="#bbbbbb", arrowsize=0.6];',
-        f'  "L" [label="{_esc(learner_name)}", shape=box, style="filled,rounded", '
-        f'fillcolor="{C_LEARNER}", fontcolor="white"];',
+        '  edge [color="#9aa5b1", arrowsize=0.6];',
+        f'  "t" [label="{_esc(target.lower())}", shape=circle, style=filled, '
+        f'fillcolor="{C_TARGET}", fontcolor="white", fontsize=22, width=1.0, fixedsize=true];',
     ]
-    word_fill = {"ok": C_WORD_OK, "known": C_WORD_KNOWN, "hard": C_WORD_HARD}
-    word_border = {"ok": C_MASTERED, "known": "#aaaaaa", "hard": C_TARGET}
-    seen_g: set[str] = set()
-    for e in entries:
-        wid = f"w_{e['word']}"
-        v = e["verdict"]
+    for w in words:
         lines.append(
-            f'  "{wid}" [label="{_esc(e["word"])}", shape=box, style=filled, '
-            f'fillcolor="{word_fill[v]}", color="{word_border[v]}", penwidth=2];'
+            f'  "w_{w}" [label="{_esc(w)}", shape=box, style="filled,rounded", '
+            f'fillcolor="{C_WORD_OK}", color="{C_MASTERED}", penwidth=2];'
         )
-        lines.append(f'  "L" -> "{wid}" [style=invis];')
-        for gtext, mastered in e["graphemes"]:
-            gid = f"g_{gtext}"
-            if gid not in seen_g:
-                seen_g.add(gid)
-                if target is not None and gtext == target:
-                    fill, font = C_TARGET, "white"
-                elif mastered:
-                    fill, font = C_MASTERED, "white"
-                else:
-                    fill, font = C_OTHER_NEW, "black"
-                lines.append(
-                    f'  "{gid}" [label="{_esc(gtext)}", shape=circle, style=filled, '
-                    f'fillcolor="{fill}", fontcolor="{font}"];'
-                )
-            lines.append(f'  "{wid}" -> "{gid}";')
+        lines.append(f'  "t" -> "w_{w}";')
     lines.append("}")
     return "\n".join(lines)
+
+
+def _chips(breakdown: dict[str, list[tuple[str, bool]]], words: list[str], target: str) -> list:
+    """Per-word colored-letter chip data for the decision step.
+
+    Returns a list of ``{word, letters: [(display, state)]}`` where state is
+    ``mastered`` | ``target`` | ``other_new`` — the basis for the legible,
+    rule-obvious rendering of "exactly one new letter".
+    """
+    out = []
+    for w in words:
+        letters = []
+        for gtext, mastered in breakdown.get(w, []):
+            if gtext == target:
+                state = "target"
+            elif mastered:
+                state = "mastered"
+            else:
+                state = "other_new"
+            letters.append((gtext.lower(), state))
+        out.append({"word": w, "letters": letters})
+    return out
 
 
 def _dot_learner_state(learner_name: str, graphemes: list[str]) -> str:
@@ -194,7 +191,7 @@ def _dot_learner_state(learner_name: str, graphemes: list[str]) -> str:
     ]
     for g in graphemes:
         lines.append(
-            f'  "g_{g}" [label="{_esc(g)}", shape=circle, style=filled, '
+            f'  "g_{g}" [label="{_esc(g.lower())}", shape=circle, style=filled, '
             f'fillcolor="{C_MASTERED}", fontcolor="white"];'
         )
         lines.append(f'  "L" -> "g_{g}";')
@@ -237,19 +234,21 @@ def step_decision(db: Neo4jDB, learner_id: str, learner_name: str, n_each: int =
     hard = [r["word"] for r in db.query(TOO_HARD, learner_id=learner_id)[:n_each]]
 
     bd = _breakdown(db, learner_id, accepted + known + hard)
-    entries = (
-        [{"word": w, "verdict": "ok", "graphemes": bd[w]} for w in accepted]
-        + [{"word": w, "verdict": "known", "graphemes": bd[w]} for w in known]
-        + [{"word": w, "verdict": "hard", "graphemes": bd[w]} for w in hard]
-    )
     return Step(
         cypher=NEXT_BEST.strip(),
         params={"learner_id": learner_id},
         rows=nbw,
-        dot=_dot(learner_name, entries, target=target),
-        note=f"The rule is visible on the graph: a word is **next-best** only when exactly "
+        note=f"The rule is visible per word: a word is **next-best** only when exactly "
         f"one letter is still red. The highest-leverage new skill here is **'{target}'**.",
-        extra={"target": target, "accepted": accepted, "known": known, "hard": hard},
+        extra={
+            "target": target,
+            "accepted": accepted,
+            "known": known,
+            "hard": hard,
+            "chips_accepted": _chips(bd, accepted, target),
+            "chips_known": _chips(bd, known, target),
+            "chips_hard": _chips(bd, hard, target),
+        },
     )
 
 
@@ -257,13 +256,11 @@ def step_ripple(db: Neo4jDB, learner_id: str, learner_name: str, target: str) ->
     """Step 3 — learning one grapheme unlocks a wave of newly-decodable words."""
     before = db.query(DECODABLE_COUNT, learner_id=learner_id)[0]["decodable"]
     unlocked = [r["word"] for r in db.query(RIPPLE, learner_id=learner_id, target=target)]
-    bd = _breakdown(db, learner_id, unlocked[:10])
-    entries = [{"word": w, "verdict": "ok", "graphemes": bd[w]} for w in unlocked[:10]]
     return Step(
         cypher=RIPPLE.strip(),
         params={"learner_id": learner_id, "target": target},
         rows=[{"word": w} for w in unlocked],
-        dot=_dot(learner_name, entries, target=target),
+        dot=_dot_ripple_tree(target, unlocked[:14]),
         note=f"One new grapheme — '{target}' — unlocks **{len(unlocked)} common words** in a "
         "single traversal. That network effect is why a graph beats flat storage.",
         extra={

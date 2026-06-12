@@ -60,6 +60,34 @@ def cypher_block(step: traverse.Step) -> None:
         st.caption(f"params: `{step.params}`")
 
 
+_CHIP_COLOR = {
+    "mastered": ("#2e8b57", "white"),
+    "target": ("#d9534f", "white"),
+    "other_new": ("#e0a458", "black"),
+}
+
+
+def chip_rows(title: str, chips: list[dict], verdict_html: str) -> None:
+    """Render candidate words as colored letter-chips with a verdict (the rule, made obvious)."""
+    if not chips:
+        return
+    st.markdown(f"**{title}**")
+    for c in chips:
+        spans = "".join(
+            f'<span style="background:{_CHIP_COLOR[s][0]};color:{_CHIP_COLOR[s][1]};'
+            f'padding:3px 9px;margin:2px;border-radius:5px;font-family:monospace;'
+            f'font-weight:600;">{ltr}</span>'
+            for ltr, s in c["letters"]
+        )
+        st.markdown(
+            f'<div style="margin:4px 0;">'
+            f'<span style="display:inline-block;width:70px;font-weight:600;">{c["word"]}</span>'
+            f"{spans}"
+            f'<span style="margin-left:12px;color:#555;">{verdict_html}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+
 def persona_card(learner: dict, summary: dict) -> None:
     st.markdown(f"### {learner['emoji']} {learner['name']}")
     st.caption(f"Age {learner['age']} · {learner['level']}")
@@ -134,12 +162,17 @@ with tab_flow:
             target = None
         else:
             target = s2.extra["target"]
-            st.graphviz_chart(s2.dot, use_container_width=True)
             st.markdown(s2.note)
+            chip_rows(
+                f"✅ NEXT-BEST — exactly one new letter (`{target}`)",
+                s2.extra["chips_accepted"],
+                "✅ teach this",
+            )
+            chip_rows("⏭️ Already decodable — zero new letters", s2.extra["chips_known"], "skip")
+            chip_rows("🚫 Too hard — two or more new letters", s2.extra["chips_hard"], "not yet")
             st.caption(
-                f"✅ accepted (1 new = `{target}`): {', '.join(s2.extra['accepted'])} · "
-                f"⏭️ already known: {', '.join(s2.extra['known'])} · "
-                f"🚫 too hard (2+ new): {', '.join(s2.extra['hard'])}"
+                "🟩 mastered · 🟥 the one new grapheme · 🟧 another not-yet grapheme — "
+                "a word is accepted only when it has exactly one 🟥/🟧."
             )
             cypher_block(s2)
         st.session_state.flow_target = target
