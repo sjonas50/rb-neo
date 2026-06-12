@@ -87,28 +87,44 @@ class Profile:
 PROFILES: list[Profile] = [
     Profile(
         Learner(
-            id="ava", name="Ava", level="beginner", age=5, emoji="🦕",
+            id="ava",
+            name="Ava",
+            level="beginner",
+            age=5,
+            emoji="🦕",
             interests=["dinosaurs", "digging", "the color green"],
         ),
         known=11,
     ),
     Profile(
         Learner(
-            id="ben", name="Ben", level="mid", age=6, emoji="⚽",
+            id="ben",
+            name="Ben",
+            level="mid",
+            age=6,
+            emoji="⚽",
             interests=["soccer", "his dog Rex", "pizza"],
         ),
         known=27,
     ),
     Profile(
         Learner(
-            id="maya", name="Maya", level="mid", age=6, emoji="🚀",
+            id="maya",
+            name="Maya",
+            level="mid",
+            age=6,
+            emoji="🚀",
             interests=["space", "rockets", "the moon"],
         ),
         known=27,
     ),
     Profile(
         Learner(
-            id="cara", name="Cara", level="advanced", age=7, emoji="🎨",
+            id="cara",
+            name="Cara",
+            level="advanced",
+            age=7,
+            emoji="🎨",
             interests=["painting", "horses", "rainbows"],
         ),
         known=32,

@@ -114,9 +114,7 @@ class Neo4jDB:
             session.run(
                 "MATCH ()-[r]->() CALL (r) { DELETE r } IN TRANSACTIONS OF 10000 ROWS"
             ).consume()
-            session.run(
-                "MATCH (n) CALL (n) { DELETE n } IN TRANSACTIONS OF 10000 ROWS"
-            ).consume()
+            session.run("MATCH (n) CALL (n) { DELETE n } IN TRANSACTIONS OF 10000 ROWS").consume()
         log.warning("db.reset", message="all nodes deleted")
 
     # -- helpers ----------------------------------------------------------------

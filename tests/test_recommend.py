@@ -80,3 +80,40 @@ def test_advanced_learner_knows_more_than_beginner(seeded) -> None:
     ava = recommend.mastery_summary(db, "ava")
     cara = recommend.mastery_summary(db, "cara")
     assert cara["mastered"] > ava["mastered"]
+
+
+@requires_neo4j
+def test_personas_present(seeded) -> None:
+    db = seeded
+    learners = {x["id"]: x for x in recommend.list_learners(db)}
+    assert {"ava", "ben", "maya", "cara"} <= set(learners)
+    assert "dinosaurs" in learners["ava"]["interests"]
+
+
+@requires_neo4j
+def test_mastery_twins_have_identical_safe_set(seeded) -> None:
+    # Ben and Maya share mastery on purpose -> identical decodable set (the split-screen).
+    db = seeded
+    ben = [r["word"] for r in recommend.cross_word(db, "ben", "sh", limit=10)]
+    maya = [r["word"] for r in recommend.cross_word(db, "maya", "sh", limit=10)]
+    assert ben and ben == maya
+
+
+@requires_neo4j
+def test_common_only_restricts_to_curated_words(seeded) -> None:
+    db = seeded
+    common = recommend.next_best_word(db, "ava", limit=15, common_only=True)
+    tagged = {r["word"] for r in db.query("MATCH (w:Word {common:true}) RETURN w.text AS word")}
+    assert common, "expected curated next-best words"
+    assert all(r["word"] in tagged for r in common)
+
+
+@requires_neo4j
+def test_viz_html_builds(seeded) -> None:
+    pytest.importorskip("pyvis")
+    from rb_neo import viz
+
+    db = seeded
+    words = [r["word"] for r in recommend.cross_word(db, "ben", "sh", limit=4)]
+    html = viz.build_word_graph_html(db, words, learner_id="ben", height="200px")
+    assert "vis" in html.lower() and len(html) > 1000

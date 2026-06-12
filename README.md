@@ -33,6 +33,29 @@ uv run rb-neo explain --learner ava       # structured teacher guidance (LLM if 
 uv run pytest -q                          # tests (integration auto-skips without Neo4j)
 ```
 
+## Showcase web app (the demo)
+
+An investor-facing Streamlit dashboard that makes the value concrete: **the graph
+guarantees what's safe to teach; the LLM makes it personal.**
+
+```bash
+uv pip install -e ".[showcase]"                # adds streamlit + pyvis
+export ANTHROPIC_API_KEY=sk-ant-...            # (or put it in .env) for LIVE lessons
+uv run rb-neo ingest --sample 30000            # broad corpus so common words appear
+uv run rb-neo synth                            # 4 synthetic kids with interests
+uv run streamlit run app/streamlit_app.py      # open http://localhost:8501
+```
+
+Three tabs:
+- **👧 Student dashboard** — pick a child; the graph picks the next target skill and the
+  guaranteed-decodable practice words; click *Generate* for a live, interest-themed lesson.
+- **🆚 Same skill, two kids** — the money shot: identical graph-computed safe words for two
+  children → two different Claude-written lessons (e.g. soccer vs. space).
+- **🕸️ The graph** — watch words share letters and sounds, with a learner's mastery overlaid.
+
+> Without `ANTHROPIC_API_KEY`, lessons show a deterministic offline preview so the app still
+> runs (good for screenshots); set the key for live generation. Only synthetic data is sent.
+
 ## Graph schema
 
 ```

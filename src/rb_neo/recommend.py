@@ -169,9 +169,7 @@ def mastery_aware(
     db: Neo4jDB, learner_id: str, limit: int = 15, common_only: bool = True
 ) -> list[dict]:
     """Fully decodable words for fluency practice."""
-    return db.query(
-        _MASTERY_AWARE, learner_id=learner_id, limit=limit, common_only=common_only
-    )
+    return db.query(_MASTERY_AWARE, learner_id=learner_id, limit=limit, common_only=common_only)
 
 
 def remediation(db: Neo4jDB, learner_id: str, limit: int = 10) -> list[dict]:
