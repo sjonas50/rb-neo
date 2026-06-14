@@ -330,3 +330,22 @@ _BLENDS = [
 COMMON_WORDS: list[str] = sorted(
     set(_CVC + _SH + _CH + _TH + _CK + _DOUBLES + _VOWEL_TEAMS + _R_CONTROLLED + _BLENDS)
 )
+
+# Multi-syllable words for the "Anatomy of a word" view. Guaranteed-ingested (but
+# NOT tagged common, so they don't enter the recommender's decodable candidate
+# set) — a random corpus sample won't reliably contain them.
+ANATOMY_WORDS: list[str] = [
+    "rocket",
+    "pocket",
+    "basket",
+    "sunset",
+    "trumpet",
+    "magnet",
+    "napkin",
+    "helmet",
+    "picnic",
+    "tablet",
+    "sandwich",
+    "catfish",
+    "laptop",
+]

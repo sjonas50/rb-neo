@@ -32,6 +32,13 @@ class PhonemeUnit(BaseModel):
     is_vowel: bool
 
 
+class Sentence(BaseModel):
+    """A decodable example sentence carried by some words (anim payload)."""
+
+    text: str
+    audio: str = ""
+
+
 class WordRecord(BaseModel):
     """Fully parsed representation of one ``<word>.json`` file."""
 
@@ -47,6 +54,17 @@ class WordRecord(BaseModel):
     phonemes: list[PhonemeUnit] = Field(default_factory=list)
     patterns: list[str] = Field(default_factory=list)
     rime_key: str = ""
+
+    # Cross-level structure derived in parsing (all from the same word):
+    #   contains_chunk:    (syllable_text, chunk_text)  — level C contains level B
+    #   contains_grapheme: (chunk_text, grapheme_text)  — level B contains level A
+    #   gpc:               (grapheme_text, phoneme_text) — only when 1:1 aligned
+    #   sound_phoneme:     (sound_id, phoneme_text)      — audio realizes a phoneme
+    contains_chunk: list[tuple[str, str]] = Field(default_factory=list)
+    contains_grapheme: list[tuple[str, str]] = Field(default_factory=list)
+    gpc: list[tuple[str, str]] = Field(default_factory=list)
+    sound_phoneme: list[tuple[str, str]] = Field(default_factory=list)
+    sentences: list[Sentence] = Field(default_factory=list)
 
     @property
     def phoneme_seq(self) -> tuple[str, ...]:

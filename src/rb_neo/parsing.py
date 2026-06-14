@@ -12,7 +12,7 @@ import random
 from pathlib import Path
 from urllib.parse import unquote
 
-from .models import ChunkUnit, GraphemeUnit, PhonemeUnit, WordRecord
+from .models import ChunkUnit, GraphemeUnit, PhonemeUnit, Sentence, WordRecord
 
 # -- phoneme inventory (ARPABET-style, lowercase as used in sgstRWP) -------------
 
@@ -200,6 +200,85 @@ def _pair_sounds(breaks: list[str], sounds: list[str]) -> list[tuple[str, str]]:
     return out
 
 
+def _spans(tokens: list[str]) -> list[tuple[str, int, int]]:
+    """Return ``(text, start, end)`` character spans for an ordered token list."""
+    out: list[tuple[str, int, int]] = []
+    pos = 0
+    for t in tokens:
+        out.append((t, pos, pos + len(t)))
+        pos += len(t)
+    return out
+
+
+def align_containment(outer: list[str], inner: list[str]) -> list[tuple[str, str]]:
+    """Map each ``inner`` token to the ``outer`` token that spans its start.
+
+    Both lists are decompositions of the *same* written word (so they share a
+    character length); a finer level (e.g. graphemes) nests inside a coarser one
+    (e.g. chunks). Assigning by the inner token's start offset picks exactly one
+    container, robust to boundary disagreements.
+
+    Returns:
+        Unique ``(outer_text, inner_text)`` pairs.
+    """
+    outer_spans = _spans(outer)
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for itext, istart, _iend in _spans(inner):
+        container = next(
+            (otext for otext, ostart, oend in outer_spans if ostart <= istart < oend), None
+        )
+        if container is not None:
+            pair = (container, itext)
+            if pair not in seen:
+                seen.add(pair)
+                pairs.append(pair)
+    return pairs
+
+
+def align_gpc(
+    graphemes: list[GraphemeUnit], phonemes: list[PhonemeUnit]
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Align graphemes to phonemes 1:1 when their counts match exactly.
+
+    Grapheme-phoneme correspondence (GPC) is the atomic unit of phonics, but the
+    mapping is only unambiguous when each grapheme produces exactly one phoneme
+    (CVC, most digraph words). When counts differ (silent-e, ``x`` -> /k+s/,
+    complex vowels) we conservatively emit nothing — never a wrong edge.
+
+    Returns:
+        ``(gpc, sound_phoneme)`` where ``gpc`` is ``(grapheme_text, phoneme_text)``
+        and ``sound_phoneme`` is ``(sound_id, phoneme_text)`` for graphemes that
+        carry a sound. Empty lists when the alignment is ambiguous.
+    """
+    if not graphemes or len(graphemes) != len(phonemes):
+        return [], []
+    gpc: list[tuple[str, str]] = []
+    sound_phoneme: list[tuple[str, str]] = []
+    for g, p in zip(graphemes, phonemes, strict=True):
+        gpc.append((g.text, p.text))
+        if g.sound:
+            sound_phoneme.append((g.sound, p.text))
+    return gpc, sound_phoneme
+
+
+def _decode_sentence(raw: str) -> str:
+    """Turn an anim sentence (``The+rocket+is+fast.``, URL-encoded) into prose."""
+    return unquote(raw).replace("+", " ").strip()
+
+
+def extract_sentences(word: dict) -> list[Sentence]:
+    """Pull decodable example sentences from a word's ``anim`` payload."""
+    out: list[Sentence] = []
+    seen: set[str] = set()
+    for a in word.get("anim", []):
+        text = _decode_sentence(a.get("sentence", ""))
+        if text and text not in seen:
+            seen.add(text)
+            out.append(Sentence(text=text, audio=a.get("sentence_audio", "")))
+    return out
+
+
 def parse_word_file(path: Path) -> WordRecord | None:
     """Parse a single word JSON file into a :class:`WordRecord`.
 
@@ -233,6 +312,14 @@ def parse_word_file(path: Path) -> WordRecord | None:
     for i, p in enumerate(t for t in w.get("sgstRWP", "").split("+") if t):
         phonemes.append(PhonemeUnit(pos=i, text=p, is_vowel=p in VOWEL_PHONEMES))
 
+    # Cross-level containment, computed from the same word's three decompositions.
+    a_tokens = [g.text for g in graphemes]
+    b_tokens = [c.text for c in chunks if c.level == "B"]
+    c_tokens = [c.text for c in chunks if c.level == "C"]
+    contains_chunk = align_containment(c_tokens, b_tokens) if c_tokens and b_tokens else []
+    contains_grapheme = align_containment(b_tokens, a_tokens) if b_tokens and a_tokens else []
+    gpc, sound_phoneme = align_gpc(graphemes, phonemes)
+
     return WordRecord(
         text=text,
         written=written,
@@ -246,6 +333,11 @@ def parse_word_file(path: Path) -> WordRecord | None:
         phonemes=phonemes,
         patterns=extract_patterns(graphemes, phonemes),
         rime_key=rime_key(phonemes),
+        contains_chunk=contains_chunk,
+        contains_grapheme=contains_grapheme,
+        gpc=gpc,
+        sound_phoneme=sound_phoneme,
+        sentences=extract_sentences(w),
     )
 
 

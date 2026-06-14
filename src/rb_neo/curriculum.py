@@ -113,6 +113,13 @@ MATCH (a:Skill {key: e.prereq}), (b:Skill {key: e.skill})
 MERGE (a)-[:PREREQUISITE_OF]->(b)
 """
 
+# Connect every grapheme (and its case variants) to the curriculum skill it
+# teaches, so ZPD traversals are pure graph hops instead of key-property matches.
+_LINK_GRAPHEME_SKILLS = """
+MATCH (g:Grapheme), (s:Skill {key: g.key})
+MERGE (g)-[:IS_SKILL]->(s)
+"""
+
 
 def apply_curriculum(db: Neo4jDB) -> dict[str, int]:
     """Write the skill DAG into the graph (idempotent) and key the graphemes.
@@ -125,5 +132,6 @@ def apply_curriculum(db: Neo4jDB) -> dict[str, int]:
     prereqs = prerequisite_rows()
     db.write_batches(_MERGE_SKILLS, skills)
     db.write_batches(_MERGE_PREREQS, prereqs)
+    db.write(_LINK_GRAPHEME_SKILLS)
     log.info("curriculum.applied", skills=len(skills), prerequisites=len(prereqs))
     return {"skills": len(skills), "prerequisites": len(prereqs)}

@@ -30,6 +30,7 @@ CONSTRAINTS: list[tuple[str, str]] = [
     ("Rime", "key"),
     ("Learner", "id"),
     ("Skill", "key"),
+    ("Sentence", "text"),
 ]
 
 # Plain indexes for nodes we MERGE on a composite key (no single-prop uniqueness).

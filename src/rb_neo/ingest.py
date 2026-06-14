@@ -56,13 +56,18 @@ MERGE (ph:Phoneme {arpabet: p.text})
 MERGE (word)-[:HAS_PHONEME {pos: p.pos}]->(ph)
 """
 
-# Level B -> Chunk, Level C -> Syllable. Same payload shape, two labels.
+# Level B -> Chunk, Level C -> Syllable. Each unit carries its own shared sound
+# mp3 (audsoundsB / audsoundsC) so every granularity is independently pronounceable.
 _CHUNKS = """
 UNWIND $batch AS w
 UNWIND [c IN w.chunks WHERE c.level = 'B'] AS c
 MATCH (word:Word {text: w.text})
 MERGE (ch:Chunk {text: c.text})
 MERGE (word)-[:HAS_CHUNK {pos: c.pos}]->(ch)
+FOREACH (_ IN CASE WHEN c.sound <> '' THEN [1] ELSE [] END |
+  MERGE (s:Sound {id: c.sound})
+  MERGE (ch)-[:PRODUCES_SOUND]->(s)
+)
 """
 
 _SYLLABLES = """
@@ -71,6 +76,53 @@ UNWIND [c IN w.chunks WHERE c.level = 'C'] AS c
 MATCH (word:Word {text: w.text})
 MERGE (sy:Syllable {text: c.text})
 MERGE (word)-[:HAS_SYLLABLE {pos: c.pos}]->(sy)
+FOREACH (_ IN CASE WHEN c.sound <> '' THEN [1] ELSE [] END |
+  MERGE (s:Sound {id: c.sound})
+  MERGE (sy)-[:PRODUCES_SOUND]->(s)
+)
+"""
+
+# The cross-level containment hierarchy: Syllable -> Chunk -> Grapheme. These are
+# global spelling facts (syllable 'rock' always contains chunk 'ock'); MERGE keeps
+# them idempotent as words reinforce the same structure.
+_CONTAINS_CHUNK = """
+UNWIND $batch AS w
+UNWIND w.contains_chunk AS pair
+MATCH (sy:Syllable {text: pair[0]}), (ch:Chunk {text: pair[1]})
+MERGE (sy)-[:CONTAINS_CHUNK]->(ch)
+"""
+
+_CONTAINS_GRAPHEME = """
+UNWIND $batch AS w
+UNWIND w.contains_grapheme AS pair
+MATCH (ch:Chunk {text: pair[0]}), (gr:Grapheme {text: pair[1]})
+MERGE (ch)-[:CONTAINS_GRAPHEME]->(gr)
+"""
+
+# Grapheme-phoneme correspondence (the atomic unit of phonics) and the audio that
+# realizes each phoneme — emitted only for 1:1-aligned words (see parsing.align_gpc).
+_GPC = """
+UNWIND $batch AS w
+UNWIND w.gpc AS pair
+MATCH (gr:Grapheme {text: pair[0]}), (ph:Phoneme {arpabet: pair[1]})
+MERGE (gr)-[:MAPS_TO_PHONEME]->(ph)
+"""
+
+_SOUND_PHONEME = """
+UNWIND $batch AS w
+UNWIND w.sound_phoneme AS pair
+MATCH (s:Sound {id: pair[0]}), (ph:Phoneme {arpabet: pair[1]})
+MERGE (s)-[:REALIZES]->(ph)
+"""
+
+# Decodable example sentences (anim payload; ~3% of words carry one).
+_SENTENCES = """
+UNWIND $batch AS w
+UNWIND w.sentences AS sent
+MATCH (word:Word {text: w.text})
+MERGE (s:Sentence {text: sent.text})
+  ON CREATE SET s.audio = sent.audio
+MERGE (word)-[:APPEARS_IN]->(s)
 """
 
 _PATTERNS = """
@@ -94,7 +146,22 @@ MATCH (a:Word {text: pair.a}), (b:Word {text: pair.b})
 MERGE (a)-[:MINIMAL_PAIR_OF]-(b)
 """
 
-_STATEMENTS = [_WORDS, _GRAPHEMES, _PHONEMES, _CHUNKS, _SYLLABLES, _PATTERNS, _RIME]
+# Order matters: nodes (_WORDS.._SYLLABLES) before the edges that connect them
+# (containment, GPC, sound-phoneme, sentences).
+_STATEMENTS = [
+    _WORDS,
+    _GRAPHEMES,
+    _PHONEMES,
+    _CHUNKS,
+    _SYLLABLES,
+    _PATTERNS,
+    _RIME,
+    _CONTAINS_CHUNK,
+    _CONTAINS_GRAPHEME,
+    _GPC,
+    _SOUND_PHONEME,
+    _SENTENCES,
+]
 
 
 def _record_to_payload(rec: WordRecord) -> dict:
@@ -112,6 +179,11 @@ def _record_to_payload(rec: WordRecord) -> dict:
         "phonemes": [p.model_dump() for p in rec.phonemes],
         "chunks": [c.model_dump() for c in rec.chunks],
         "patterns": rec.patterns,
+        "contains_chunk": [list(p) for p in rec.contains_chunk],
+        "contains_grapheme": [list(p) for p in rec.contains_grapheme],
+        "gpc": [list(p) for p in rec.gpc],
+        "sound_phoneme": [list(p) for p in rec.sound_phoneme],
+        "sentences": [s.model_dump() for s in rec.sentences],
     }
 
 
@@ -218,6 +290,26 @@ def ensure_common_words(db: Neo4jDB, words_dir: str | Path) -> int:
     tagged = db.query(_COUNT_COMMON)[0]["tagged"]
     log.info("ingest.common_tagged", requested=len(COMMON_WORDS), tagged=tagged)
     return tagged
+
+
+def ensure_words(db: Neo4jDB, words_dir: str | Path, words: list[str]) -> int:
+    """Ingest specific word files (idempotent) without tagging them ``common``.
+
+    Used to guarantee demo words (e.g. the multi-syllable ``ANATOMY_WORDS``) are
+    present without adding them to the recommender's decodable candidate set.
+
+    Returns:
+        The number of the requested words successfully parsed and ingested.
+    """
+    records: list[WordRecord] = []
+    for word in words:
+        rec = parse_word_file(Path(words_dir) / f"{word}.json")
+        if rec is not None:
+            records.append(rec)
+    if records:
+        ingest_words(db, records)
+    log.info("ingest.ensure_words", requested=len(words), ingested=len(records))
+    return len(records)
 
 
 def load_from_dir(

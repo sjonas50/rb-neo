@@ -142,14 +142,57 @@ def test_skill_map_statuses_partition_curriculum(seeded) -> None:
 
 
 @requires_neo4j
+def test_enriched_relationships_present(seeded) -> None:
+    """Tier 1-2 enrichment: hierarchy, level audio, GPC, sound-phoneme, skill links."""
+    db = seeded
+    patterns = [
+        "(:Chunk)-[:PRODUCES_SOUND]->(:Sound)",
+        "(:Syllable)-[:PRODUCES_SOUND]->(:Sound)",
+        "(:Syllable)-[:CONTAINS_CHUNK]->(:Chunk)",
+        "(:Chunk)-[:CONTAINS_GRAPHEME]->(:Grapheme)",
+        "(:Grapheme)-[:MAPS_TO_PHONEME]->(:Phoneme)",
+        "(:Sound)-[:REALIZES]->(:Phoneme)",
+        "(:Grapheme)-[:IS_SKILL]->(:Skill)",
+    ]
+    for pat in patterns:
+        n = db.query(f"MATCH {pat} RETURN count(*) AS n")[0]["n"]
+        assert n > 0, f"no edges for {pat}"
+
+
+@requires_neo4j
+def test_word_anatomy_builds(seeded) -> None:
+    from rb_neo import traverse
+
+    db = seeded
+    anat = traverse.word_anatomy(db, "ship")
+    assert anat.rows, "expected anatomy for 'ship'"
+    lv = anat.extra["levels"]
+    assert lv["graphemes"] == ["sh", "i", "p"]
+    assert anat.dot.startswith("digraph")
+    # GPC is this word's own 1:1 alignment, not the grapheme's global mappings.
+    assert {(r["grapheme"], r["phoneme"]) for r in anat.extra["gpc"]} == {
+        ("sh", "sh"),
+        ("i", "ih"),
+        ("p", "p"),
+    }
+
+
+@requires_neo4j
 def test_browser_queries_all_execute(seeded) -> None:
-    """Every curated Browser query must run against a seeded graph and return rows."""
+    """Every curated Browser query is valid Cypher against the current schema.
+
+    All must execute without error (catches typos / renamed relationships). The
+    schema-level queries must also return rows; word-specific demo queries may be
+    empty on the small test slice (their demo words live in the 30k demo graph).
+    """
     from rb_neo import browser
 
     db = seeded
+    must_have_rows = {"scale", "curriculum", "prereqs", "mastery", "frontier", "hub-graphemes"}
     for q in browser.BROWSER_QUERIES:
-        rows = db.query(q.cypher)
-        assert rows, f"browser query '{q.key}' returned no rows"
+        rows = db.query(q.cypher)  # raises on invalid Cypher
+        if q.key in must_have_rows:
+            assert rows, f"browser query '{q.key}' returned no rows"
 
 
 def test_browser_render_round_trips() -> None:

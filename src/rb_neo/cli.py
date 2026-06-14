@@ -11,9 +11,10 @@ from . import agent, browser, recommend
 from .config import get_settings
 from .curriculum import apply_curriculum
 from .db import Neo4jDB, Neo4jUnavailable
-from .ingest import ensure_common_words, load_from_dir
+from .ingest import ensure_common_words, ensure_words, load_from_dir
 from .logging import configure_logging, get_logger
 from .synthetic import PROFILES, seed_learners
+from .wordlists import ANATOMY_WORDS
 
 app = typer.Typer(help="rb-neo: early-reading knowledge-graph PoC", no_args_is_help=True)
 log = get_logger()
@@ -67,6 +68,7 @@ def ingest(
             batch_size=batch_size,
         )
         tagged = ensure_common_words(db, settings.rb_words_dir)
+        ensure_words(db, settings.rb_words_dir, ANATOMY_WORDS)
     typer.echo(
         f"Ingested {summary['words']} words "
         f"({summary['skipped']} skipped, {summary['minimal_pairs']} minimal pairs, "

@@ -7,8 +7,14 @@ from pathlib import Path
 import pytest
 
 from rb_neo.ingest import derive_minimal_pairs, load_from_dir
-from rb_neo.models import PhonemeUnit, WordRecord
-from rb_neo.parsing import classify_grapheme, decode_filename, parse_word_file
+from rb_neo.models import GraphemeUnit, PhonemeUnit, WordRecord
+from rb_neo.parsing import (
+    align_containment,
+    align_gpc,
+    classify_grapheme,
+    decode_filename,
+    parse_word_file,
+)
 
 from .conftest import requires_neo4j
 
@@ -55,6 +61,39 @@ def test_parse_cat() -> None:
     assert rec.phoneme_seq == ("k", "ae", "t")
     assert rec.rime_key == "ae+t"
     assert "CVC" in rec.patterns
+
+
+# -- unit: cross-level structure -------------------------------------------------
+
+
+def test_align_containment_nests_by_offset() -> None:
+    # rocket: syllables [rock, et] contain chunks [r, ock, et].
+    pairs = align_containment(["rock", "et"], ["r", "ock", "et"])
+    assert ("rock", "r") in pairs
+    assert ("rock", "ock") in pairs
+    assert ("et", "et") in pairs
+    # No chunk is assigned to two syllables.
+    assert len(pairs) == 3
+
+
+def test_align_gpc_one_to_one_only() -> None:
+    g = [GraphemeUnit(pos=i, text=t, type="letter", length=len(t), sound=f"s{i}")
+         for i, t in enumerate(["c", "a", "t"])]
+    p = [PhonemeUnit(pos=i, text=t, is_vowel=t == "ae") for i, t in enumerate(["k", "ae", "t"])]
+    gpc, sound_phoneme = align_gpc(g, p)
+    assert gpc == [("c", "k"), ("a", "ae"), ("t", "t")]
+    assert sound_phoneme == [("s0", "k"), ("s1", "ae"), ("s2", "t")]
+    # Count mismatch (e.g. silent-e: 4 graphemes, 3 phonemes) -> nothing emitted.
+    assert align_gpc(g, p[:2]) == ([], [])
+
+
+@pytest.mark.skipif(not (WORDS_DIR / "rocket.json").exists(), reason="words corpus not present")
+def test_parse_rocket_hierarchy() -> None:
+    rec = parse_word_file(WORDS_DIR / "rocket.json")
+    assert rec is not None
+    assert ("rock", "ock") in rec.contains_chunk
+    assert ("ock", "ck") in rec.contains_grapheme
+    assert ("ck", "k") in rec.gpc
 
 
 # -- unit: minimal pairs ---------------------------------------------------------
