@@ -14,11 +14,13 @@ Paste any query below into the bar at the top. Queries that `RETURN` whole nodes
 4. [A learner's mastery over the curriculum](#a-learners-mastery-over-the-curriculum)
 5. [The ZPD frontier — mastered vs. the next reachable skill](#the-zpd-frontier-mastered-vs-the-next-reachable-skill)
 6. [Shared sub-word units — the reuse made literal](#shared-sub-word-units-the-reuse-made-literal)
-7. [One word, fully decomposed](#one-word-fully-decomposed)
-8. [The ripple — one new skill unlocks a wave of words](#the-ripple-one-new-skill-unlocks-a-wave-of-words)
-9. [Rhyme families — shared Rime nodes](#rhyme-families-shared-rime-nodes)
-10. [Minimal pairs — one phoneme apart](#minimal-pairs-one-phoneme-apart)
-11. [The busiest shared nodes](#the-busiest-shared-nodes)
+7. [Anatomy of a word — the full linguistic hierarchy](#anatomy-of-a-word-the-full-linguistic-hierarchy)
+8. [One sound, all its spellings (GPC)](#one-sound-all-its-spellings-gpc)
+9. [A shared sub-word unit across words](#a-shared-sub-word-unit-across-words)
+10. [The ripple — one new skill unlocks a wave of words](#the-ripple-one-new-skill-unlocks-a-wave-of-words)
+11. [Rhyme families — shared Rime nodes](#rhyme-families-shared-rime-nodes)
+12. [Minimal pairs — one phoneme apart](#minimal-pairs-one-phoneme-apart)
+13. [The busiest shared nodes](#the-busiest-shared-nodes)
 
 ## Scale & reuse — why a graph at all
 
@@ -88,19 +90,46 @@ WHERE w.text IN ['kick','sock','pick','sick','tick','tack','pack']
 RETURN w, g
 ```
 
-## One word, fully decomposed
+## Anatomy of a word — the full linguistic hierarchy
 
-Every layer the corpus carries for a single word: graphemes, the sounds they produce, and ARPABET phonemes.
+Every layer the corpus carries for one word, connected: Word → Syllables → Chunks → Graphemes, the Sound each level plays, and the Phoneme each grapheme maps to (GPC). The whole nested structure in one traversal.
 
 ```cypher
-MATCH (w:Word {text: 'ship'})
-OPTIONAL MATCH (w)-[:HAS_GRAPHEME]->(g:Grapheme)
-OPTIONAL MATCH (g)-[:PRODUCES_SOUND]->(s:Sound)
-OPTIONAL MATCH (w)-[:HAS_PHONEME]->(p:Phoneme)
-RETURN w, g, s, p
+MATCH (w:Word {text: 'rocket'})
+OPTIONAL MATCH (w)-[:HAS_SYLLABLE]->(sy:Syllable)
+OPTIONAL MATCH (sy)-[:CONTAINS_CHUNK]->(ch:Chunk)<-[:HAS_CHUNK]-(w)
+OPTIONAL MATCH (ch)-[:CONTAINS_GRAPHEME]->(g:Grapheme)<-[:HAS_GRAPHEME]-(w)
+OPTIONAL MATCH (g)-[:MAPS_TO_PHONEME]->(p:Phoneme)<-[:HAS_PHONEME]-(w)
+OPTIONAL MATCH (g)-[:PRODUCES_SOUND]->(snd:Sound)<-[:HAS_SOUND]-(w)
+RETURN w, sy, ch, g, p, snd
 ```
 
-> 💡 Swap 'ship' for any word in the corpus.
+> 💡 The back-links (<-[:HAS_*]-(w)) keep shared nodes scoped to THIS word. Swap 'rocket' for any multi-syllable word (pocket, basket, trumpet…).
+
+## One sound, all its spellings (GPC)
+
+The phonics payoff: every grapheme that maps to the long-e phoneme /iy/ — ee, ea, e, y, ey… — discovered through MAPS_TO_PHONEME. The same shape answers 'how is this sound written?' for any phoneme.
+
+```cypher
+MATCH (g:Grapheme)-[:MAPS_TO_PHONEME]->(p:Phoneme {arpabet: 'iy'})
+RETURN p, g
+```
+
+> 💡 Swap 'iy' for any ARPABET phoneme: 'sh', 'ae', 'k', 'aa'…
+
+## A shared sub-word unit across words
+
+One chunk node ('ock') and the words built from it — the reuse story at the chunk level, with the chunk's own audio and graphemes.
+
+```cypher
+MATCH (w:Word)-[:HAS_CHUNK]->(ch:Chunk {text: 'ock'})
+WHERE w.common = true
+OPTIONAL MATCH (ch)-[:CONTAINS_GRAPHEME]->(g:Grapheme)
+OPTIONAL MATCH (ch)-[:PRODUCES_SOUND]->(s:Sound)
+RETURN w, ch, g, s
+```
+
+> 💡 Drop the `WHERE w.common` line to see every corpus word built from 'ock'.
 
 ## The ripple — one new skill unlocks a wave of words
 

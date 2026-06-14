@@ -34,6 +34,10 @@ uv run ruff check src && uv run ruff format src
 - **Mastery = pyBKT per skill node**, with an exponential decay fallback before fit. DKT only at scale.
 - **Derived edges** computed at ingest: `Rime` nodes (not pairwise RHYMES_WITH) and `MINIMAL_PAIR_OF`
   via phoneme-wildcard hashing (O(n·L), not O(n²)).
+- **Full linguistic hierarchy** (the source's three decomposition levels, char-aligned): Syllable
+  `-CONTAINS_CHUNK->` Chunk `-CONTAINS_GRAPHEME->` Grapheme. Each level carries `PRODUCES_SOUND`
+  (audsounds/B/C). Grapheme `-MAPS_TO_PHONEME->` Phoneme (GPC, 1:1-aligned only) and Sound
+  `-REALIZES->` Phoneme. `parsing.align_containment` / `align_gpc` compute these offline.
 
 ## File structure
 ```

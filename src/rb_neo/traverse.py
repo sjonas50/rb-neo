@@ -33,6 +33,7 @@ C_ZPD = "#e8a33d"  # gold   — in the ZPD: unmastered, prerequisites met
 C_LOCKED = "#e9e9e9"  # grey   — blocked by an unmastered prerequisite
 C_TARGET = "#d9534f"  # red    — the one new grapheme being introduced
 C_WORD_OK = "#eafaef"
+C_WORD = "#1f3a5f"  # navy   — the Word node in the anatomy view
 
 
 @dataclass
@@ -382,6 +383,171 @@ def step_words(
             "chips_known": _chips(bd, known, target),
             "chips_hard": _chips(bd, hard, target),
         },
+    )
+
+
+# ── word anatomy: the full linguistic hierarchy for one word ─────────────────
+
+ANATOMY_LEVELS = """
+MATCH (w:Word {text: $word})
+OPTIONAL MATCH (w)-[hs:HAS_SYLLABLE]->(sy:Syllable)
+WITH w, sy ORDER BY hs.pos
+WITH w, collect(DISTINCT sy.text) AS sylls
+OPTIONAL MATCH (w)-[hc:HAS_CHUNK]->(ch:Chunk)
+WITH w, sylls, ch ORDER BY hc.pos
+WITH w, sylls, collect(DISTINCT ch.text) AS chunks
+OPTIONAL MATCH (w)-[hg:HAS_GRAPHEME]->(g:Grapheme)
+WITH w, sylls, chunks, g ORDER BY hg.pos
+WITH w, sylls, chunks, collect(DISTINCT g.text) AS graphemes
+OPTIONAL MATCH (w)-[hp:HAS_PHONEME]->(p:Phoneme)
+WITH w, sylls, chunks, graphemes, p ORDER BY hp.pos
+RETURN sylls, chunks, graphemes, collect(DISTINCT p.arpabet) AS phonemes
+"""
+
+# Containment / GPC restricted to one word's own units (both endpoints belong to
+# the word, so we never pull in another word's decomposition of a shared node).
+ANATOMY_SYL_CHUNK = """
+MATCH (w:Word {text: $word})-[:HAS_SYLLABLE]->(sy:Syllable)-[:CONTAINS_CHUNK]->(ch:Chunk)
+MATCH (w)-[:HAS_CHUNK]->(ch)
+RETURN DISTINCT sy.text AS syllable, ch.text AS chunk
+"""
+
+ANATOMY_CHUNK_GRAPHEME = """
+MATCH (w:Word {text: $word})-[:HAS_CHUNK]->(ch:Chunk)-[:CONTAINS_GRAPHEME]->(g:Grapheme)
+MATCH (w)-[:HAS_GRAPHEME]->(g)
+RETURN DISTINCT ch.text AS chunk, g.text AS grapheme
+"""
+
+# This word's grapheme/phoneme sequences in order (with duplicates) so GPC can be
+# reconstructed by positional zip — the global MAPS_TO_PHONEME edge can't tell us
+# which phoneme THIS word's grapheme makes (a grapheme maps to many across words).
+ANATOMY_SEQ = """
+MATCH (w:Word {text: $word})
+OPTIONAL MATCH (w)-[hg:HAS_GRAPHEME]->(g:Grapheme)
+WITH w, g, hg ORDER BY hg.pos
+WITH w, collect(g.text) AS graphemes
+OPTIONAL MATCH (w)-[hp:HAS_PHONEME]->(p:Phoneme)
+WITH graphemes, p, hp ORDER BY hp.pos
+RETURN graphemes, collect(p.arpabet) AS phonemes
+"""
+
+ANATOMY_SOUNDED = """
+MATCH (w:Word {text: $word})
+CALL (w) {
+  MATCH (w)-[:HAS_SYLLABLE]->(sy:Syllable)-[:PRODUCES_SOUND]->() RETURN 'syll:'+sy.text AS k
+  UNION
+  MATCH (w)-[:HAS_CHUNK]->(ch:Chunk)-[:PRODUCES_SOUND]->() RETURN 'chunk:'+ch.text AS k
+  UNION
+  MATCH (w)-[:HAS_GRAPHEME]->(g:Grapheme)-[:PRODUCES_SOUND]->() RETURN 'graph:'+g.text AS k
+}
+RETURN collect(k) AS sounded
+"""
+
+
+def _dot_anatomy(
+    word: str,
+    levels: dict,
+    syl_chunk: list[dict],
+    chunk_graph: list[dict],
+    gpc: list[dict],
+    sounded: set[str],
+) -> str:
+    """Top-down layered graph of one word's full linguistic hierarchy.
+
+    Word → Syllables → Chunks → Graphemes → Phonemes, with a 🔊 marker on every
+    unit that carries its own audio. Rows are pinned with rank=same so the
+    nesting reads cleanly.
+    """
+
+    def lbl(text: str, key: str) -> str:
+        return f"{text} 🔊" if key in sounded else text
+
+    lines = [
+        "digraph G {",
+        "  rankdir=TB;",
+        '  bgcolor="transparent";',
+        "  ranksep=0.55; nodesep=0.22;",
+        '  node [fontname="Helvetica", fontsize=14, style="filled,rounded", shape=box];',
+        '  edge [color="#9aa5b1", arrowsize=0.6];',
+    ]
+    # Word
+    lines.append(
+        f'  "w" [label="{_esc(word)}", shape=box, fillcolor="{C_WORD}", '
+        f'fontcolor="white", fontsize=18];'
+    )
+    # Rows
+    rows = [
+        ("sy", levels["sylls"], "#6b4e9e", "white", "syll"),
+        ("ch", levels["chunks"], "#2c7da0", "white", "chunk"),
+        ("g", levels["graphemes"], C_MASTERED, "white", "graph"),
+        ("p", levels["phonemes"], "#e8a33d", "black", None),
+    ]
+    for prefix, items, fill, fg, sound_ns in rows:
+        ids = "; ".join(f'"{prefix}:{_esc(t)}"' for t in items)
+        if ids:
+            lines.append(f"  {{ rank=same; {ids} }}")
+        for t in items:
+            key = f"{sound_ns}:{t}" if sound_ns else ""
+            label = lbl(t, key) if sound_ns else f"/{t}/"
+            lines.append(
+                f'  "{prefix}:{_esc(t)}" [label="{_esc(label)}", '
+                f'fillcolor="{fill}", fontcolor="{fg}"];'
+            )
+    # Edges
+    for sy in levels["sylls"]:
+        lines.append(f'  "w" -> "sy:{_esc(sy)}";')
+    for r in syl_chunk:
+        lines.append(f'  "sy:{_esc(r["syllable"])}" -> "ch:{_esc(r["chunk"])}";')
+    for r in chunk_graph:
+        lines.append(f'  "ch:{_esc(r["chunk"])}" -> "g:{_esc(r["grapheme"])}";')
+    gpc_pairs = {(r["grapheme"], r["phoneme"]) for r in gpc}
+    for g, p in gpc_pairs:
+        lines.append(f'  "g:{_esc(g)}" -> "p:{_esc(p)}" [color="#e8a33d", penwidth=1.4];')
+    # Phonemes with no GPC edge (ambiguous alignment): tie to the word, dashed.
+    linked_p = {p for _g, p in gpc_pairs}
+    for p in levels["phonemes"]:
+        if p not in linked_p:
+            lines.append(f'  "w" -> "p:{_esc(p)}" [style=dashed, color="#ccd2d9"];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def word_anatomy(db: Neo4jDB, word: str) -> Step:
+    """Build the full-hierarchy anatomy view for one word."""
+    rows = db.query(ANATOMY_LEVELS, word=word)
+    if not rows or not rows[0]["graphemes"]:
+        return Step(
+            cypher=ANATOMY_LEVELS.strip(),
+            params={"word": word},
+            rows=[],
+            note=f"No word '{word}' in the graph.",
+        )
+    levels = rows[0]
+    syl_chunk = db.query(ANATOMY_SYL_CHUNK, word=word)
+    chunk_graph = db.query(ANATOMY_CHUNK_GRAPHEME, word=word)
+    # GPC by positional zip (1:1 only) — this word's own correspondence.
+    seq = db.query(ANATOMY_SEQ, word=word)[0]
+    gpc = []
+    if len(seq["graphemes"]) == len(seq["phonemes"]):
+        seen_gpc: set[tuple[str, str]] = set()
+        for g, p in zip(seq["graphemes"], seq["phonemes"], strict=True):
+            if (g, p) not in seen_gpc:
+                seen_gpc.add((g, p))
+                gpc.append({"grapheme": g, "phoneme": p})
+    sounded = set(db.query(ANATOMY_SOUNDED, word=word)[0]["sounded"])
+    n_sounds = len(sounded)
+    return Step(
+        cypher=ANATOMY_LEVELS.strip(),
+        params={"word": word},
+        rows=[levels],
+        dot=_dot_anatomy(word, levels, syl_chunk, chunk_graph, gpc, sounded),
+        note=(
+            f"**{word}** = {len(levels['sylls'])} syllable(s) → {len(levels['chunks'])} chunk(s) "
+            f"→ {len(levels['graphemes'])} grapheme(s) → {len(levels['phonemes'])} phoneme(s). "
+            f"{n_sounds} units carry their own audio (🔊); "
+            f"{len(gpc)} grapheme→phoneme correspondences."
+        ),
+        extra={"levels": levels, "gpc": gpc, "sounded": sounded},
     )
 
 

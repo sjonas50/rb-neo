@@ -54,7 +54,7 @@ uv run rb-neo synth                            # 4 synthetic kids with interests
 uv run streamlit run app/streamlit_app.py      # open http://localhost:8501
 ```
 
-Two tabs:
+Three tabs:
 - **🎯 Watch the graph decide** — the ZPD loop computed live *on the graph*, with the
   **real Cypher shown at every step**:
   1. the child's position on the **curriculum DAG** — mastered (green), **ZPD** (gold:
@@ -72,6 +72,10 @@ Two tabs:
      (persona + safe set), the structured lesson back, and a **graph audit of the AI's
      story** — every word re-checked against the child's mastery, off-curriculum words
      flagged. The same graph that constrains the input verifies the output.
+- **🔬 Anatomy of a word** — the full linguistic hierarchy for any word, rendered as a
+  layered graph: Word → Syllables → Chunks → Graphemes → Phonemes, with 🔊 on every unit
+  that carries its own audio and gold grapheme→phoneme (GPC) edges. The "show every
+  relationship between letters, chunks, syllables and sounds" view.
 - **🆚 Same skill, two kids** — identical graph-computed safe words for two children →
   two different Claude-written lessons (e.g. soccer vs. space).
 
@@ -97,19 +101,28 @@ Full write-up with screenshots-worthy queries: [`docs/neo4j-queries.md`](docs/ne
 
 ```
 (:Word {text, prlevel, rwp, rime_key, audio})
-  -[:HAS_GRAPHEME {pos}]   -> (:Grapheme {text, type, length})   # letter|digraph|blend|r_controlled|vowel_team|morpheme
-  -[:HAS_SOUND {pos}]      -> (:Sound {id})                      # 93 shared mp3s
-  -[:HAS_PHONEME {pos}]    -> (:Phoneme {arpabet, is_vowel})     # 39 shared
-  -[:HAS_CHUNK {pos}]      -> (:Chunk {text})                    # level-B onset/rime
-  -[:HAS_SYLLABLE {pos}]   -> (:Syllable {text})                 # level-C
+  -[:HAS_GRAPHEME {pos}]   -> (:Grapheme {text, key, type, length})  # level A (letter|digraph|blend|...)
+  -[:HAS_CHUNK {pos}]      -> (:Chunk {text})                     # level B onset/rime
+  -[:HAS_SYLLABLE {pos}]   -> (:Syllable {text})                 # level C
+  -[:HAS_SOUND {pos}]      -> (:Sound {id})                      # shared mp3s
+  -[:HAS_PHONEME {pos}]    -> (:Phoneme {arpabet, is_vowel})     # 39 shared, ARPABET
   -[:EXEMPLIFIES]          -> (:Pattern {name})                  # CVC, silent_e, has_digraph, ...
   -[:HAS_RIME]             -> (:Rime {key})                      # rhyme via shared node
   -[:MINIMAL_PAIR_OF]      -  (:Word)                            # differ by exactly one phoneme
+  -[:APPEARS_IN]           -> (:Sentence {text, audio})          # decodable example sentence
 
-(:Grapheme)-[:PRODUCES_SOUND]->(:Sound)
+# the linguistic hierarchy — the three decomposition levels nested by char offset:
+(:Syllable)-[:CONTAINS_CHUNK]->(:Chunk)-[:CONTAINS_GRAPHEME]->(:Grapheme)
+
+# every level is independently pronounceable, and the phonics correspondence:
+(:Grapheme)-[:PRODUCES_SOUND]->(:Sound)        (:Chunk)-[:PRODUCES_SOUND]->(:Sound)
+(:Syllable)-[:PRODUCES_SOUND]->(:Sound)
+(:Grapheme)-[:MAPS_TO_PHONEME]->(:Phoneme)     # GPC, the atomic unit of phonics (1:1-aligned)
+(:Sound)-[:REALIZES]->(:Phoneme)               # the audio that realizes a phoneme
 
 (:Skill {key, kind, phase, seq})                                 # the phonics curriculum
   -[:PREREQUISITE_OF] -> (:Skill)                                # hand-authored DAG (sh ← s, h)
+(:Grapheme)-[:IS_SKILL]->(:Skill)                                # grapheme → the skill it teaches
 
 (:Learner {id, name, level})
   -[:ATTEMPTED {ts, correct}] -> (:Word)
@@ -118,7 +131,9 @@ Full write-up with screenshots-worthy queries: [`docs/neo4j-queries.md`](docs/ne
 ```
 
 Graphemes carry ``key = toLower(text)`` so the corpus's case-variant nodes (`Ss`, `Ll`, `A`)
-collapse to one skill each; all mastery logic compares keys.
+collapse to one skill each; all mastery logic compares keys. The three decomposition levels
+(A/B/C) are character-aligned, so the `CONTAINS_*` hierarchy is computed deterministically at
+ingest — see the **🔬 Anatomy of a word** tab in the app, or the `anatomy` Browser query.
 
 ## What the recommender does (all single Cypher traversals)
 

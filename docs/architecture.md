@@ -50,8 +50,8 @@ rb-neo is a **content knowledge graph** of the existing word corpus plus a **lea
 | Logging | `logging.py` | structlog console setup | level | bound logger |
 | DB wrapper | `db.py` | Driver lifecycle, schema constraints/indexes, batch write helpers, reset | `Settings` | `Neo4jDB` |
 | Models | `models.py` | Pydantic schemas for parsed words/units | — | `WordRecord` etc. |
-| Parser | `parsing.py` | Decode filename + JSON → graphemes/phonemes/patterns/rime; classify blends/digraphs | `words/*.json` | `WordRecord` |
-| Ingester | `ingest.py` | Idempotent UNWIND/MERGE batch load; derived edges (rime, minimal pairs) | `list[WordRecord]` | graph nodes/rels |
+| Parser | `parsing.py` | Decode filename + JSON → graphemes/chunks/syllables/phonemes/patterns/rime; cross-level containment (`align_containment`), GPC (`align_gpc`), sentences | `words/*.json` | `WordRecord` |
+| Ingester | `ingest.py` | Idempotent UNWIND/MERGE batch load; level audio, containment hierarchy, GPC, sound↔phoneme, sentences; derived edges (rime, minimal pairs) | `list[WordRecord]` | graph nodes/rels |
 | Curriculum | `curriculum.py` | Phonics scope/sequence as `Skill` DAG (`PREREQUISITE_OF`); grapheme `key` normalization | hand-authored | skill subgraph |
 | Showcase steps | `traverse.py` | Narrated traversal steps (Cypher + result + Graphviz) for the Streamlit demo | `learner_id` | `Step` objects |
 | Mastery | `mastery.py` | BKT per skill; update from attempts; decay fallback; write `HAS_MASTERY` | attempts | mastery probs |

@@ -108,20 +108,53 @@ BROWSER_QUERIES: list[BrowserQuery] = [
         ),
     ),
     BrowserQuery(
-        key="decompose",
-        title="One word, fully decomposed",
+        key="anatomy",
+        title="Anatomy of a word — the full linguistic hierarchy",
         why=(
-            "Every layer the corpus carries for a single word: graphemes, the sounds "
-            "they produce, and ARPABET phonemes."
+            "Every layer the corpus carries for one word, connected: Word → Syllables "
+            "→ Chunks → Graphemes, the Sound each level plays, and the Phoneme each "
+            "grapheme maps to (GPC). The whole nested structure in one traversal."
         ),
         cypher=(
-            "MATCH (w:Word {text: 'ship'})\n"
-            "OPTIONAL MATCH (w)-[:HAS_GRAPHEME]->(g:Grapheme)\n"
-            "OPTIONAL MATCH (g)-[:PRODUCES_SOUND]->(s:Sound)\n"
-            "OPTIONAL MATCH (w)-[:HAS_PHONEME]->(p:Phoneme)\n"
-            "RETURN w, g, s, p"
+            "MATCH (w:Word {text: 'rocket'})\n"
+            "OPTIONAL MATCH (w)-[:HAS_SYLLABLE]->(sy:Syllable)\n"
+            "OPTIONAL MATCH (sy)-[:CONTAINS_CHUNK]->(ch:Chunk)<-[:HAS_CHUNK]-(w)\n"
+            "OPTIONAL MATCH (ch)-[:CONTAINS_GRAPHEME]->(g:Grapheme)<-[:HAS_GRAPHEME]-(w)\n"
+            "OPTIONAL MATCH (g)-[:MAPS_TO_PHONEME]->(p:Phoneme)<-[:HAS_PHONEME]-(w)\n"
+            "OPTIONAL MATCH (g)-[:PRODUCES_SOUND]->(snd:Sound)<-[:HAS_SOUND]-(w)\n"
+            "RETURN w, sy, ch, g, p, snd"
         ),
-        tip="Swap 'ship' for any word in the corpus.",
+        tip=(
+            "The back-links (<-[:HAS_*]-(w)) keep shared nodes scoped to THIS word. "
+            "Swap 'rocket' for any multi-syllable word (pocket, basket, trumpet…)."
+        ),
+    ),
+    BrowserQuery(
+        key="sound-spellings",
+        title="One sound, all its spellings (GPC)",
+        why=(
+            "The phonics payoff: every grapheme that maps to the long-e phoneme /iy/ "
+            "— ee, ea, e, y, ey… — discovered through MAPS_TO_PHONEME. The same shape "
+            "answers 'how is this sound written?' for any phoneme."
+        ),
+        cypher=("MATCH (g:Grapheme)-[:MAPS_TO_PHONEME]->(p:Phoneme {arpabet: 'iy'})\nRETURN p, g"),
+        tip="Swap 'iy' for any ARPABET phoneme: 'sh', 'ae', 'k', 'aa'…",
+    ),
+    BrowserQuery(
+        key="shared-unit",
+        title="A shared sub-word unit across words",
+        why=(
+            "One chunk node ('ock') and the words built from it — the reuse story at "
+            "the chunk level, with the chunk's own audio and graphemes."
+        ),
+        cypher=(
+            "MATCH (w:Word)-[:HAS_CHUNK]->(ch:Chunk {text: 'ock'})\n"
+            "WHERE w.common = true\n"
+            "OPTIONAL MATCH (ch)-[:CONTAINS_GRAPHEME]->(g:Grapheme)\n"
+            "OPTIONAL MATCH (ch)-[:PRODUCES_SOUND]->(s:Sound)\n"
+            "RETURN w, ch, g, s"
+        ),
+        tip="Drop the `WHERE w.common` line to see every corpus word built from 'ock'.",
     ),
     BrowserQuery(
         key="ripple",

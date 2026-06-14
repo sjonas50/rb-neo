@@ -31,6 +31,7 @@ from rb_neo import agent, recommend, traverse
 from rb_neo.config import get_settings
 from rb_neo.db import Neo4jDB, Neo4jUnavailable
 from rb_neo.traversal_player import build_traversal_html
+from rb_neo.wordlists import ANATOMY_WORDS
 
 st.set_page_config(
     page_title="rb-neo — reading on a knowledge graph", page_icon="📚", layout="wide"
@@ -268,7 +269,9 @@ st.caption(
     + ("🟢 Live Claude lessons." if live else "🟡 No ANTHROPIC_API_KEY — offline lesson preview.")
 )
 
-tab_flow, tab_split = st.tabs(["🎯 Watch the graph decide", "🆚 Same skill, two kids"])
+tab_flow, tab_anatomy, tab_split = st.tabs(
+    ["🎯 Watch the graph decide", "🔬 Anatomy of a word", "🆚 Same skill, two kids"]
+)
 
 # ── TAB 1: the guided ZPD traversal ───────────────────────────────────────────
 with tab_flow:
@@ -432,7 +435,47 @@ with tab_flow:
         st.divider()
         render_audit(db, lid, f"{lesson.title} {lesson.story}", words, lname)
 
-# ── TAB 2: split-screen personalization ───────────────────────────────────────
+# ── TAB: anatomy of a word — the full linguistic hierarchy ────────────────────
+with tab_anatomy:
+    st.markdown(
+        "Every word is the *same word at six levels of granularity*. The graph connects "
+        "them: **Word → Syllables → Chunks → Graphemes → Phonemes**, with the shared "
+        "audio each level plays. One traversal renders the whole nested structure."
+    )
+    examples = ANATOMY_WORDS + ["ship", "fish", "chest"]
+    ac = st.columns([2, 3])
+    pick = ac[0].selectbox("Example word", examples, key="anat_pick")
+    typed = ac[1].text_input("…or type any word in the corpus", key="anat_typed").strip().lower()
+    word = typed or pick
+    anat = traverse.word_anatomy(db, word)
+    if not anat.rows:
+        st.warning(anat.note)
+    else:
+        st.markdown(anat.note)
+        lv = anat.extra["levels"]
+        m = st.columns(5)
+        m[0].metric("Syllables", len(lv["sylls"]))
+        m[1].metric("Chunks", len(lv["chunks"]))
+        m[2].metric("Graphemes", len(lv["graphemes"]))
+        m[3].metric("Phonemes", len(lv["phonemes"]))
+        m[4].metric("Units with audio 🔊", len(anat.extra["sounded"]))
+        st.graphviz_chart(anat.dot, width="stretch")
+        st.caption(
+            "🟦 word · 🟪 syllable · 🟦 chunk · 🟩 grapheme · 🟧 phoneme. 🔊 = the unit "
+            "carries its own shared audio. Gold edges are grapheme→phoneme correspondences "
+            "(GPC) — shown where the alignment is unambiguously 1:1; phonemes with a dashed "
+            "link have an ambiguous mapping (silent-e, x→/k+s/) and are tied to the word."
+        )
+        with st.expander("🔎 The traversal (Word → Syllable → Chunk → Grapheme → Phoneme)"):
+            st.code(anat.cypher, language="cypher")
+            st.caption(f"params: `{anat.params}`")
+        st.info(
+            "Because every sub-word node is shared (MERGE-on-key), these same syllable, "
+            "chunk, grapheme, sound, and phoneme nodes are reused across thousands of "
+            "other words — this anatomy is one slice through a dense, shared graph."
+        )
+
+# ── TAB: split-screen personalization ─────────────────────────────────────────
 with tab_split:
     st.markdown(
         "Same target skill. **Identical** graph-computed safe words. Two children → two "
