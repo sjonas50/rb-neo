@@ -38,6 +38,7 @@ UNWIND w.graphemes AS g
 MATCH (word:Word {text: w.text})
 MERGE (gr:Grapheme {text: g.text})
   ON CREATE SET gr.type = g.type, gr.length = g.length
+SET gr.key = toLower(g.text)
 MERGE (word)-[:HAS_GRAPHEME {pos: g.pos}]->(gr)
 FOREACH (_ IN CASE WHEN g.sound <> '' THEN [1] ELSE [] END |
   MERGE (s:Sound {id: g.sound})

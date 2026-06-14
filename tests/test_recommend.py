@@ -37,11 +37,11 @@ def test_next_best_word_introduces_exactly_one_new_grapheme(seeded) -> None:
     rows = recommend.next_best_word(db, "ava", limit=20)
     assert rows, "expected at least one next-best word"
     for r in rows:
-        # Every returned word's unmastered set is exactly the single 'introduces' grapheme.
+        # Every returned word's unmastered key set is exactly the 'introduces' grapheme.
         masked = db.query(
             "MATCH (l:Learner {id:'ava'}), (w:Word {text:$wt})-[:HAS_GRAPHEME]->(g:Grapheme) "
             "WHERE NOT (l)-[:MASTERED {mastered:true}]->(g) "
-            "RETURN collect(DISTINCT g.text) AS unmastered",
+            "RETURN collect(DISTINCT g.key) AS unmastered",
             wt=r["word"],
         )[0]["unmastered"]
         assert masked == [r["introduces"]]
@@ -67,7 +67,7 @@ def test_cross_word_contains_target(seeded) -> None:
     rows = recommend.cross_word(db, "cara", "sh", limit=10)
     for r in rows:
         has_target = db.query(
-            "MATCH (w:Word {text:$wt})-[:HAS_GRAPHEME]->(g:Grapheme {text:'sh'}) "
+            "MATCH (w:Word {text:$wt})-[:HAS_GRAPHEME]->(g:Grapheme {key:'sh'}) "
             "RETURN count(g) AS n",
             wt=r["word"],
         )[0]["n"]
@@ -109,28 +109,117 @@ def test_common_only_restricts_to_curated_words(seeded) -> None:
 
 
 @requires_neo4j
-def test_traverse_decision_and_ripple(seeded) -> None:
+def test_zpd_pool_respects_prerequisites(seeded) -> None:
+    """Every ZPD skill is unmastered with ALL prerequisites mastered; locked skills are out."""
+    db = seeded
+    pool = {r["skill"] for r in recommend.zpd_pool(db, "ava", limit=50)}
+    locked = {r["skill"] for r in recommend.locked_skills(db, "ava")}
+    assert pool, "expected a non-empty ZPD"
+    assert pool.isdisjoint(locked)
+    # Ava (taught through 'k') has c+k mastered -> 'ck' is in her ZPD,
+    # while 'sh' is locked because 'h' is not yet mastered.
+    assert "ck" in pool
+    assert "sh" in locked
+    for skill in pool:
+        unmet = db.query(
+            "MATCH (p:Skill)-[:PREREQUISITE_OF]->(s:Skill {key:$k}) "
+            "WHERE NOT (:Learner {id:'ava'})-[:MASTERED {mastered:true}]->(p) "
+            "RETURN count(p) AS n",
+            k=skill,
+        )[0]["n"]
+        assert unmet == 0
+
+
+@requires_neo4j
+def test_skill_map_statuses_partition_curriculum(seeded) -> None:
+    db = seeded
+    rows = recommend.skill_map(db, "ava")
+    assert rows, "expected curriculum skills"
+    assert {r["status"] for r in rows} <= {"mastered", "zpd", "locked"}
+    by_status = {s: [r["skill"] for r in rows if r["status"] == s] for s in ("mastered", "zpd")}
+    assert "s" in by_status["mastered"]
+    assert "ck" in by_status["zpd"]
+
+
+@requires_neo4j
+def test_traverse_zpd_flow(seeded) -> None:
     from rb_neo import traverse
 
     db = seeded
-    s2 = traverse.step_decision(db, "ava", "Ava")
-    assert s2.rows, "expected candidate words"
+    s1 = traverse.step_skill_map(db, "ava", "Ava")
+    assert s1.dot.startswith("digraph")
+    assert s1.extra["counts"]["mastered"] > 0
+
+    s2 = traverse.step_zpd_decision(db, "ava", "Ava")
+    assert s2.rows, "expected a non-empty ZPD pool"
     target = s2.extra["target"]
-    assert target and s2.extra["chips_accepted"]
-    # Every accepted word's only unmastered grapheme is the target.
-    for w in s2.extra["accepted"]:
+    assert target and s2.extra["pool"][0]["skill"] == target
+
+    s3 = traverse.step_words(db, "ava", "Ava", target)
+    assert s3.extra["chips_accepted"], "expected i+1 practice words"
+    # Every accepted word's only unmastered grapheme key is the target.
+    for w in s3.extra["accepted"]:
         unmastered = db.query(
             "MATCH (l:Learner {id:'ava'}), (x:Word {text:$wt})-[:HAS_GRAPHEME]->(g:Grapheme) "
             "WHERE NOT (l)-[:MASTERED {mastered:true}]->(g) "
-            "RETURN collect(DISTINCT g.text) AS u",
+            "RETURN collect(DISTINCT g.key) AS u",
             wt=w,
         )[0]["u"]
         assert unmastered == [target]
 
-    s3 = traverse.step_ripple(db, "ava", "Ava", target)
-    assert s3.extra["unlocked"], "learning the target should unlock words"
-    assert s3.extra["after"] >= s3.extra["before"]
-    assert s3.dot.startswith("digraph")
+    s4 = traverse.step_ripple(db, "ava", "Ava", target)
+    assert s4.extra["unlocked"], "learning the target should unlock words"
+    assert s4.extra["after"] >= s4.extra["before"]
+    assert s4.dot.startswith("digraph")
+
+
+@requires_neo4j
+def test_traversal_player_html_builds(seeded) -> None:
+    from rb_neo.traversal_player import build_traversal_html
+
+    db = seeded
+    html = build_traversal_html(db, "ava", "Ava", emoji="🦕")
+    assert "vis-network" in html and "Replay traversal" in html
+    # The payload must carry the real decision: stages + the chosen target.
+    assert '"stages"' in html
+    assert "Winner" in html
+
+
+@requires_neo4j
+def test_funnel_counts_narrow_monotonically(seeded) -> None:
+    from rb_neo import traverse
+
+    db = seeded
+    target = recommend.zpd_pool(db, "ava", limit=1)[0]["skill"]
+    stages = traverse.funnel(db, "ava", target)
+    counts = [s["count"] for s in stages]
+    assert counts == sorted(counts, reverse=True)
+    assert counts[-1] > 0
+
+
+@requires_neo4j
+def test_audit_lesson_statuses(seeded) -> None:
+    from rb_neo import agent
+
+    db = seeded
+    # 'cat' is decodable for Ava; 'kick' is in the safe set being taught;
+    # 'the' is a sight word; 'rocket' is off-curriculum.
+    audit = agent.audit_lesson(db, "ava", "The cat can kick a rocket.", safe_words=["kick"])
+    by_word = {a["word"]: a["status"] for a in audit}
+    assert by_word["cat"] == "decodable"
+    assert by_word["kick"] == "practice"
+    assert by_word["the"] == "sight"
+    assert by_word["rocket"] == "flagged"
+
+
+@requires_neo4j
+def test_profile_returns_plan_operators(seeded) -> None:
+    from rb_neo.recommend import _ZPD_POOL
+
+    db = seeded
+    plan = db.profile(_ZPD_POOL, learner_id="ava", limit=8)
+    assert plan, "expected plan operators"
+    assert any((r["db_hits"] or 0) > 0 for r in plan)
 
 
 @requires_neo4j

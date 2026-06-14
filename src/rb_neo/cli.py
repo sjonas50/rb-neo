@@ -9,6 +9,7 @@ import typer
 
 from . import agent, recommend
 from .config import get_settings
+from .curriculum import apply_curriculum
 from .db import Neo4jDB, Neo4jUnavailable
 from .ingest import ensure_common_words, load_from_dir
 from .logging import configure_logging, get_logger
@@ -37,10 +38,14 @@ def _main() -> None:
 
 @app.command()
 def init() -> None:
-    """Apply schema constraints and indexes (idempotent)."""
+    """Apply schema constraints/indexes and the curriculum skill DAG (idempotent)."""
     with db_session() as db:
         db.apply_schema()
-    typer.echo("Schema applied.")
+        counts = apply_curriculum(db)
+    typer.echo(
+        f"Schema applied. Curriculum: {counts['skills']} skills, "
+        f"{counts['prerequisites']} prerequisite edges."
+    )
 
 
 @app.command()

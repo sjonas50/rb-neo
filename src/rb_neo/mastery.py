@@ -103,17 +103,20 @@ def compute_mastery(
 
     for att in ordered:
         for gtext, gtype in word_graphemes.get(att.word, []):
-            g_type[gtext] = gtype
+            # Skill identity is the lowercase key: the corpus's case-variant
+            # grapheme nodes ('s', 'Ss'→'ss', 'Ll'→'ll') are the same skill.
+            key = gtext.lower()
+            g_type[key] = gtype
             params = params_for(gtype)
-            if gtext not in p_state:
-                p_state[gtext] = params.p_l0
-                counts[gtext] = 0
+            if key not in p_state:
+                p_state[key] = params.p_l0
+                counts[key] = 0
             else:
-                days_idle = (att.ts - last_ts[gtext]) / 86400.0
-                p_state[gtext] = apply_decay(p_state[gtext], days_idle, decay_rate)
-            p_state[gtext] = bkt_update(p_state[gtext], att.correct, params)
-            last_ts[gtext] = att.ts
-            counts[gtext] += 1
+                days_idle = (att.ts - last_ts[key]) / 86400.0
+                p_state[key] = apply_decay(p_state[key], days_idle, decay_rate)
+            p_state[key] = bkt_update(p_state[key], att.correct, params)
+            last_ts[key] = att.ts
+            counts[key] += 1
 
     return [
         MasteryEstimate(skill=g, skill_kind="grapheme", p=round(p, 4), attempts=counts[g])
@@ -136,11 +139,22 @@ RETURN wt AS word, g.text AS gtext, g.type AS gtype
 ORDER BY r.pos
 """
 
+# Mastery lands on every case-variant grapheme node sharing the key (so the
+# word-decodability edge checks are case-proof) AND on the curriculum Skill
+# node (so the ZPD prerequisite traversal is one hop).
 _WRITE_MASTERY = """
 UNWIND $rows AS row
 MATCH (l:Learner {id: $learner_id})
-MATCH (g:Grapheme {text: row.skill})
+MATCH (g:Grapheme {key: row.skill})
 MERGE (l)-[m:MASTERED]->(g)
+SET m.p = row.p, m.attempts = row.attempts, m.mastered = row.mastered
+"""
+
+_WRITE_SKILL_MASTERY = """
+UNWIND $rows AS row
+MATCH (l:Learner {id: $learner_id})
+MATCH (s:Skill {key: row.skill})
+MERGE (l)-[m:MASTERED]->(s)
 SET m.p = row.p, m.attempts = row.attempts, m.mastered = row.mastered
 """
 
@@ -173,5 +187,6 @@ def update_from_attempts(
         for e in estimates
     ]
     db.write(_WRITE_MASTERY, learner_id=learner_id, rows=rows)
+    db.write(_WRITE_SKILL_MASTERY, learner_id=learner_id, rows=rows)
     log.info("mastery.updated", learner=learner_id, skills=len(rows))
     return estimates

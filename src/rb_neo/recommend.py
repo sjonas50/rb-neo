@@ -19,20 +19,23 @@ from .db import Neo4jDB
 
 # A word is at the learner's i+1 frontier when every grapheme is mastered EXCEPT
 # exactly one new target — maximal reuse of known units, one new thing to learn.
+# Graphemes compare by lowercase `key` so case variants ('Ss'/'ss') are one skill.
 _NEXT_BEST_WORD = """
 MATCH (l:Learner {id: $learner_id})
+OPTIONAL MATCH (l)-[:MASTERED {mastered: true}]->(mg:Grapheme)
+WITH collect(DISTINCT mg.key) AS known
 MATCH (w:Word)-[:HAS_GRAPHEME]->(g:Grapheme)
 WHERE ($level IS NULL OR w.prlevel = $level)
   AND w.text =~ '[a-z]{3,}'
   AND (NOT $common_only OR w.common = true)
-WITH l, w, collect(DISTINCT g) AS gs
-WITH l, w, gs,
-     [x IN gs WHERE NOT (l)-[:MASTERED {mastered: true}]->(x)] AS unmastered
-WHERE size(unmastered) = 1
+WITH w, known, collect(DISTINCT g.key) AS keys
+WITH w, keys, [k IN keys WHERE NOT k IN known] AS new
+WHERE size(new) = 1
+OPTIONAL MATCH (s:Skill {key: new[0]})
 RETURN w.text AS word,
-       unmastered[0].text AS introduces,
-       unmastered[0].type AS introduces_type,
-       size(gs) AS units
+       new[0] AS introduces,
+       coalesce(s.kind, 'grapheme') AS introduces_type,
+       size(keys) AS units
 ORDER BY units ASC, word ASC
 LIMIT $limit
 """
@@ -40,15 +43,16 @@ LIMIT $limit
 # Words that practice a specific target grapheme while every OTHER grapheme is
 # already mastered — ideal decodable practice to teach that one skill.
 _CROSS_WORD = """
-MATCH (l:Learner {id: $learner_id}), (t:Grapheme {text: $target})
-MATCH (w:Word)-[:HAS_GRAPHEME]->(t)
-WHERE w.text =~ '[a-z]{3,}'
+MATCH (l:Learner {id: $learner_id})
+MATCH (w:Word)-[:HAS_GRAPHEME]->(t:Grapheme)
+WHERE t.key = $target
+  AND w.text =~ '[a-z]{3,}'
   AND (NOT $common_only OR w.common = true)
   AND NOT EXISTS {
     MATCH (w)-[:HAS_GRAPHEME]->(o:Grapheme)
-    WHERE o.text <> $target AND NOT (l)-[:MASTERED {mastered: true}]->(o)
+    WHERE o.key <> $target AND NOT (l)-[:MASTERED {mastered: true}]->(o)
   }
-RETURN w.text AS word, size([(w)-[:HAS_GRAPHEME]->(x) | x]) AS units
+RETURN DISTINCT w.text AS word, size([(w)-[:HAS_GRAPHEME]->(x) | x]) AS units
 ORDER BY units ASC, word ASC
 LIMIT $limit
 """
@@ -103,11 +107,74 @@ LIMIT $limit
 """
 
 _MASTERY_SUMMARY = """
+MATCH (s:Skill)
+WITH count(s) AS total
 MATCH (l:Learner {id: $learner_id})
-OPTIONAL MATCH (l)-[m:MASTERED]->(:Grapheme)
+OPTIONAL MATCH (l)-[m:MASTERED {mastered: true}]->(:Skill)
 RETURN l.name AS name, l.level AS level,
-       count(m) AS skills,
-       sum(CASE WHEN m.mastered THEN 1 ELSE 0 END) AS mastered
+       total AS skills,
+       count(m) AS mastered
+"""
+
+# ── ZPD over the curriculum DAG ──────────────────────────────────────────────
+# The learner's zone of proximal development: skills NOT yet mastered whose
+# prerequisites are ALL mastered — learnable right now. Each is scored by
+# leverage: how many curated words become decodable the moment it is learned.
+_ZPD_POOL = """
+MATCH (l:Learner {id: $learner_id})
+MATCH (s:Skill)
+WHERE NOT (l)-[:MASTERED {mastered: true}]->(s)
+  AND NOT EXISTS {
+    MATCH (p:Skill)-[:PREREQUISITE_OF]->(s)
+    WHERE NOT (l)-[:MASTERED {mastered: true}]->(p)
+  }
+WITH l, s, COUNT {
+  MATCH (g:Grapheme {key: s.key})<-[:HAS_GRAPHEME]-(w:Word)
+  WHERE w.common = true AND w.text =~ '[a-z]{3,}'
+    AND NOT EXISTS {
+      MATCH (w)-[:HAS_GRAPHEME]->(o:Grapheme)
+      WHERE o.key <> s.key AND NOT (l)-[:MASTERED {mastered: true}]->(o)
+    }
+  RETURN DISTINCT w
+} AS unlocks
+RETURN s.key AS skill, s.kind AS kind, s.phase AS phase, s.seq AS seq, unlocks
+ORDER BY unlocks DESC, seq ASC
+LIMIT $limit
+"""
+
+# Skills beyond the ZPD: blocked because at least one prerequisite is unmastered.
+_LOCKED_SKILLS = """
+MATCH (l:Learner {id: $learner_id})
+MATCH (p:Skill)-[:PREREQUISITE_OF]->(s:Skill)
+WHERE NOT (l)-[:MASTERED {mastered: true}]->(s)
+  AND NOT (l)-[:MASTERED {mastered: true}]->(p)
+RETURN s.key AS skill, s.kind AS kind, s.seq AS seq,
+       collect(p.key) AS missing
+ORDER BY seq ASC
+"""
+
+# Every skill with its ZPD status for one learner — feeds the skill-map viz.
+_SKILL_MAP = """
+MATCH (l:Learner {id: $learner_id})
+MATCH (s:Skill)
+OPTIONAL MATCH (l)-[m:MASTERED]->(s)
+WITH s, m,
+     [(p:Skill)-[:PREREQUISITE_OF]->(s)
+      WHERE NOT (l)-[:MASTERED {mastered: true}]->(p) | p.key] AS missing
+RETURN s.key AS skill, s.kind AS kind, s.phase AS phase, s.seq AS seq,
+       CASE
+         WHEN m IS NOT NULL AND m.mastered THEN 'mastered'
+         WHEN size(missing) = 0 THEN 'zpd'
+         ELSE 'locked'
+       END AS status,
+       missing,
+       coalesce(m.p, 0.0) AS p
+ORDER BY seq ASC
+"""
+
+_SKILL_EDGES = """
+MATCH (p:Skill)-[:PREREQUISITE_OF]->(s:Skill)
+RETURN p.key AS prereq, s.key AS skill
 """
 
 _LIST_LEARNERS = """
@@ -193,6 +260,29 @@ def minimal_pairs(db: Neo4jDB, word: str, limit: int = 15) -> list[dict]:
 
 
 def mastery_summary(db: Neo4jDB, learner_id: str) -> dict:
-    """Return ``{name, level, skills, mastered}`` for a learner."""
+    """Return ``{name, level, skills, mastered}`` over the curriculum skills."""
     rows = db.query(_MASTERY_SUMMARY, learner_id=learner_id)
     return rows[0] if rows else {}
+
+
+def zpd_pool(db: Neo4jDB, learner_id: str, limit: int = 10) -> list[dict]:
+    """The learner's ZPD: unmastered skills with all prerequisites mastered.
+
+    Ranked by leverage — how many curated words each skill would unlock.
+    """
+    return db.query(_ZPD_POOL, learner_id=learner_id, limit=limit)
+
+
+def locked_skills(db: Neo4jDB, learner_id: str) -> list[dict]:
+    """Skills beyond the ZPD, with the unmastered prerequisites blocking each."""
+    return db.query(_LOCKED_SKILLS, learner_id=learner_id)
+
+
+def skill_map(db: Neo4jDB, learner_id: str) -> list[dict]:
+    """Every curriculum skill with status ``mastered`` | ``zpd`` | ``locked``."""
+    return db.query(_SKILL_MAP, learner_id=learner_id)
+
+
+def skill_edges(db: Neo4jDB) -> list[dict]:
+    """All PREREQUISITE_OF edges (for rendering the curriculum DAG)."""
+    return db.query(_SKILL_EDGES)

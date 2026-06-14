@@ -29,12 +29,14 @@ CONSTRAINTS: list[tuple[str, str]] = [
     ("Pattern", "name"),
     ("Rime", "key"),
     ("Learner", "id"),
+    ("Skill", "key"),
 ]
 
 # Plain indexes for nodes we MERGE on a composite key (no single-prop uniqueness).
 INDEXES: list[tuple[str, str]] = [
     ("Chunk", "text"),
     ("Syllable", "text"),
+    ("Grapheme", "key"),
 ]
 
 
@@ -134,6 +136,37 @@ class Neo4jDB:
         with self.driver.session() as session:
             result = session.execute_read(lambda tx: list(tx.run(cypher, **params)))
         return [r.data() for r in result]
+
+    def profile(self, cypher: str, **params: Any) -> list[dict[str, Any]]:
+        """Run ``PROFILE <cypher>`` and return the flattened execution plan.
+
+        Each row is one plan operator with the engine's real counters:
+        ``{operator, depth, rows, db_hits}`` — proof the recommendation is a
+        native graph traversal, not app-side filtering.
+        """
+        with self.driver.session() as session:
+            result = session.run("PROFILE " + cypher, **params)
+            list(result)  # consume records so the profile is populated
+            plan = result.consume().profile
+
+        rows: list[dict[str, Any]] = []
+
+        def walk(op: dict[str, Any], depth: int) -> None:
+            args = op.get("args", {})
+            rows.append(
+                {
+                    "operator": op.get("operatorType", "?"),
+                    "depth": depth,
+                    "rows": args.get("Rows"),
+                    "db_hits": args.get("DbHits"),
+                }
+            )
+            for child in op.get("children", []):
+                walk(child, depth + 1)
+
+        if plan:
+            walk(plan, 0)
+        return rows
 
 
 def chunked(items: list[Any], size: int) -> Iterable[list[Any]]:
