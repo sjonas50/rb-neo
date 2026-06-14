@@ -20,6 +20,14 @@ sample: ~190k words but only **93 distinct sounds** (reused ~445× each), **39 p
 *"give me words that reinforce `sh` using only units this child already knows"* — a single
 graph traversal instead of a self-join nightmare.
 
+On top of the content graph sits a hand-authored **phonics curriculum as a prerequisite DAG**
+(`Skill` nodes + `PREREQUISITE_OF` edges, Letters-and-Sounds order): *sh* requires *s* and
+*h*; *ar* requires *a* and *r*. A child's **zone of proximal development** is then literally
+a query — *unmastered skills whose prerequisites are all mastered* — and each ZPD skill is
+ranked by **leverage**: how many real words it would unlock for this child today. That is the
+validated intelligent-tutoring pattern (BKT + prerequisite graph + ZPD selection) from
+`docs/research.md`, computed deterministically with zero LLM calls.
+
 ## Quickstart
 
 ```bash
@@ -47,14 +55,23 @@ uv run streamlit run app/streamlit_app.py      # open http://localhost:8501
 ```
 
 Two tabs:
-- **🎯 Watch the graph decide** — a guided traversal where the recommendation is computed
-  *on the graph*, with the **real Cypher shown at every step**:
-  1. what the graph knows about the child (mastered graphemes),
-  2. the graph evaluates every candidate word and picks the next skill — the rule is
-     *visible* (accepted = exactly one new red letter; rejected words show why),
-  3. the child masters that one grapheme → the graph **ripples** out to unlock a wave of
-     newly-decodable words (before/after count),
-  4. the LLM writes a personalized lesson from the graph-guaranteed safe set.
+- **🎯 Watch the graph decide** — the ZPD loop computed live *on the graph*, with the
+  **real Cypher shown at every step**:
+  1. the child's position on the **curriculum DAG** — mastered (green), **ZPD** (gold:
+     unmastered, every prerequisite met), locked (grey, with the blocking edge in red),
+  2. an **animated replay of the traversal on the real subgraph** (vis.js): the mastery
+     wave, the prerequisite check, leverage scores, the winning skill fanning out to its
+     words, and the i+1 rule accepting/rejecting each one — every frame driven by real
+     query rows. Plus the leverage-ranked pool, the Cypher, and Neo4j's own `PROFILE`
+     execution plan (operators, rows, db-hits),
+  3. i+1 word selection — first as a **funnel of real row counts** (30k words → curated →
+     contains the target → all-others-mastered), then per-word letter-chips,
+  4. the child masters that one skill → the graph **ripples** out to unlock a wave of
+     newly-decodable words — with their rhyme families and minimal pairs for free,
+  5. the **graph → AI → graph loop**: the verbatim JSON payload the graph hands Claude
+     (persona + safe set), the structured lesson back, and a **graph audit of the AI's
+     story** — every word re-checked against the child's mastery, off-curriculum words
+     flagged. The same graph that constrains the input verifies the output.
 - **🆚 Same skill, two kids** — identical graph-computed safe words for two children →
   two different Claude-written lessons (e.g. soccer vs. space).
 
@@ -76,15 +93,23 @@ Two tabs:
 
 (:Grapheme)-[:PRODUCES_SOUND]->(:Sound)
 
+(:Skill {key, kind, phase, seq})                                 # the phonics curriculum
+  -[:PREREQUISITE_OF] -> (:Skill)                                # hand-authored DAG (sh ← s, h)
+
 (:Learner {id, name, level})
   -[:ATTEMPTED {ts, correct}] -> (:Word)
   -[:MASTERED {p, attempts, mastered}] -> (:Grapheme)            # BKT posterior per skill
+  -[:MASTERED {p, attempts, mastered}] -> (:Skill)               # same posterior on the DAG
 ```
+
+Graphemes carry ``key = toLower(text)`` so the corpus's case-variant nodes (`Ss`, `Ll`, `A`)
+collapse to one skill each; all mastery logic compares keys.
 
 ## What the recommender does (all single Cypher traversals)
 
 | Scenario | Query | Pedagogy |
 |---|---|---|
+| **ZPD pool** | unmastered skills whose prerequisites are all mastered, ranked by words unlocked | zone of proximal development |
 | **Next-best word** | every grapheme mastered except exactly one new target | i+1 scaffolding |
 | **Cross-word** | words practicing a target grapheme, all others mastered | decodable practice |
 | **Mastery-aware** | fully decodable words (all graphemes mastered) | fluency / confidence |

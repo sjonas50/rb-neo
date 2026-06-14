@@ -153,6 +153,12 @@ class Lesson(BaseModel):
 
 _LESSON_TOOL = "emit_lesson"
 
+#: Sight words the LLM may add beyond the graph's safe set (and that the
+#: post-hoc audit therefore accepts).
+SIGHT_WORDS: frozenset[str] = frozenset(
+    {"the", "a", "is", "to", "and", "has", "his", "her", "in", "on", "can", "said"}
+)
+
 # Cacheable framing. The hard constraint (decodability) is enforced by the word
 # list the graph hands in; the LLM only personalizes the theme around it.
 _LESSON_SYSTEM = (
@@ -160,7 +166,7 @@ _LESSON_SYSTEM = (
     "child (PreK-Grade 3). You are given a TARGET phonics skill, a list of SAFE WORDS "
     "the child can already decode, and the child's interests. Hard rules: build the "
     "story almost entirely from the SAFE WORDS; you may add only the most common "
-    "sight words (the, a, is, to, and, has, his, her, in, on, can, said). Keep it 2-3 "
+    f"sight words ({', '.join(sorted(SIGHT_WORDS))}). Keep it 2-3 "
     "short sentences, joyful, and themed to the child's interests so it feels made for "
     "them. Always call the tool."
 )
@@ -196,6 +202,72 @@ def offline_lesson(db: Neo4jDB, learner_id: str, target_skill: str, words: list[
     return _lesson_fallback(persona, target_skill, words)
 
 
+def lesson_context(
+    db: Neo4jDB, learner_id: str, target_skill: str, words: list[str]
+) -> dict[str, Any]:
+    """The exact structured payload the graph hands the LLM for one lesson.
+
+    Exposed so the UI can display, verbatim, what crosses the graph → AI
+    boundary: persona facts plus the graph-guaranteed safe set, nothing else.
+    """
+    persona = recommend.get_learner(db, learner_id)
+    return {
+        "child": {"name": persona.get("name"), "age": persona.get("age")},
+        "interests": persona.get("interests") or [],
+        "target_skill": target_skill,
+        "safe_words": words,
+        "allowed_sight_words": sorted(SIGHT_WORDS),
+    }
+
+
+# -- post-hoc graph audit of the LLM's output --------------------------------------
+
+_AUDIT_WORDS = """
+MATCH (l:Learner {id: $learner_id})
+UNWIND $words AS wt
+OPTIONAL MATCH (w:Word {text: wt})
+RETURN wt AS word,
+       w IS NOT NULL AS in_graph,
+       w IS NOT NULL AND NOT EXISTS {
+         MATCH (w)-[:HAS_GRAPHEME]->(g:Grapheme)
+         WHERE NOT (l)-[:MASTERED {mastered: true}]->(g)
+       } AS decodable
+"""
+
+
+def audit_lesson(
+    db: Neo4jDB, learner_id: str, story: str, safe_words: list[str] | None = None
+) -> list[dict[str, str]]:
+    """Check every word of an LLM-written story against the child's mastery.
+
+    The same graph that selected the safe set verifies the AI's output: each
+    story word is classified ``practice`` (in the graph-provided safe set —
+    the new skill being taught), ``decodable`` (all graphemes already
+    mastered), ``sight`` (on the allowed sight-word list), or ``flagged``
+    (the LLM went off-curriculum — not readable by this child).
+
+    Returns:
+        Ordered ``[{word, status}]`` for each token in the story.
+    """
+    safe = {w.lower() for w in (safe_words or [])}
+    tokens = [t.strip(".,!?;:'\"()-—").lower() for t in story.split()]
+    tokens = [t for t in tokens if t and t.isalpha()]
+    unique = list(dict.fromkeys(tokens))
+    rows = {r["word"]: r for r in db.query(_AUDIT_WORDS, learner_id=learner_id, words=unique)}
+    out: list[dict[str, str]] = []
+    for t in tokens:
+        if t in safe:
+            status = "practice"
+        elif t in SIGHT_WORDS:
+            status = "sight"
+        elif rows.get(t, {}).get("decodable"):
+            status = "decodable"
+        else:
+            status = "flagged"
+        out.append({"word": t, "status": status})
+    return out
+
+
 def generate_lesson(
     db: Neo4jDB,
     learner_id: str,
@@ -222,11 +294,12 @@ def generate_lesson(
 
         client = Anthropic(api_key=settings.anthropic_api_key)
 
+    import json
+
+    context = lesson_context(db, learner_id, target_skill, words)
     user = (
-        f"Child: {persona.get('name')} (age {persona.get('age')}).\n"
-        f"Interests: {', '.join(persona.get('interests') or [])}.\n"
-        f"TARGET skill (new grapheme to feature): '{target_skill}'.\n"
-        f"SAFE WORDS (decodable for this child): {', '.join(words)}.\n\n"
+        "Lesson request (JSON — the knowledge graph computed the safe_words):\n"
+        f"{json.dumps(context, indent=2)}\n\n"
         f"Write the story, then call {_LESSON_TOOL}."
     )
     message = client.messages.create(

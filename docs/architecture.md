@@ -52,6 +52,8 @@ rb-neo is a **content knowledge graph** of the existing word corpus plus a **lea
 | Models | `models.py` | Pydantic schemas for parsed words/units | — | `WordRecord` etc. |
 | Parser | `parsing.py` | Decode filename + JSON → graphemes/phonemes/patterns/rime; classify blends/digraphs | `words/*.json` | `WordRecord` |
 | Ingester | `ingest.py` | Idempotent UNWIND/MERGE batch load; derived edges (rime, minimal pairs) | `list[WordRecord]` | graph nodes/rels |
+| Curriculum | `curriculum.py` | Phonics scope/sequence as `Skill` DAG (`PREREQUISITE_OF`); grapheme `key` normalization | hand-authored | skill subgraph |
+| Showcase steps | `traverse.py` | Narrated traversal steps (Cypher + result + Graphviz) for the Streamlit demo | `learner_id` | `Step` objects |
 | Mastery | `mastery.py` | BKT per skill; update from attempts; decay fallback; write `HAS_MASTERY` | attempts | mastery probs |
 | Recommender | `recommend.py` | ZPD Cypher queries: next-best-word, cross-word, mastery-aware, remediation; FSRS review | `learner_id`, params | ranked words |
 | Synthetic | `synthetic.py` | Generate `Learner` nodes w/ scope-sequence mastery + attempt history | seed, profiles | learner subgraph |
@@ -62,10 +64,11 @@ rb-neo is a **content knowledge graph** of the existing word corpus plus a **lea
 
 1. `rb-neo ingest --limit N` → parse word files → batch MERGE content graph + derived edges.
 2. `rb-neo synth` → create synthetic `Learner` nodes; for each, MASTERED edges to a prefix of the phonics scope/sequence + simulated `ATTEMPTED` history.
-3. `mastery.update_from_attempts(learner)` → BKT posterior per skill → MERGE `HAS_MASTERY {p, attempts}`.
-4. `recommend.next_best_word(learner)` → Cypher: words whose graphemes are all mastered **except exactly one** new target, ordered by mastered-unit reuse + level → returns ranked list.
-5. (Optional) `agent.explain(learner, words)` → Claude Haiku structured output: teacher rationale + a decodable sentence.
-6. `rb-neo demo` prints scenarios: next-best-word, cross-word reinforcement, mastery-aware fluency set, remediation from errors, rhyme family, minimal pairs.
+3. `mastery.update_from_attempts(learner)` → BKT posterior per skill key → MERGE `MASTERED {p, attempts, mastered}` onto every grapheme variant and the curriculum `Skill` node.
+4. `recommend.zpd_pool(learner)` → Cypher over the prerequisite DAG: unmastered skills whose prerequisites are all mastered, ranked by leverage (curated words each would unlock) → the next skill.
+5. `recommend.cross_word(learner, skill)` / `next_best_word(learner)` → i+1 words: every grapheme mastered **except exactly one** new target, ordered by mastered-unit reuse.
+6. (Optional) `agent.explain(learner, words)` → Claude structured output: teacher rationale + a decodable sentence.
+7. `rb-neo demo` prints scenarios: next-best-word, cross-word reinforcement, mastery-aware fluency set, remediation from errors, rhyme family, minimal pairs.
 
 ## 4. External Dependencies & Auth
 
