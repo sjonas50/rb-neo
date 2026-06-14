@@ -30,11 +30,14 @@ validated intelligent-tutoring pattern (BKT + prerequisite graph + ZPD selection
 
 ## Quickstart
 
+All word data is loaded from `words/*.json` (the real ~190k corpus). Set `RB_WORDS_DIR` to
+point elsewhere; otherwise it defaults to `./words`.
+
 ```bash
 docker compose up -d                      # start Neo4j (http://localhost:7474)
 uv venv && uv pip install -e ".[dev]"     # env + deps
-uv run rb-neo init                        # apply schema (constraints/indexes)
-uv run rb-neo ingest --limit 4000         # parse + load words (omit --limit / use 0 for all)
+uv run rb-neo init                        # schema (constraints/indexes) + curriculum skill DAG
+uv run rb-neo ingest --limit 4000         # load words from words/ (--limit 0 = all, --sample N = random N)
 uv run rb-neo synth                       # create synthetic learners (mastery emerges via BKT)
 uv run rb-neo demo                        # run all recommender scenarios
 uv run rb-neo explain --learner ava       # structured teacher guidance (LLM if key set, else offline)
@@ -44,15 +47,23 @@ uv run pytest -q                          # tests (integration auto-skips withou
 ## Showcase web app (the demo)
 
 An investor-facing Streamlit dashboard that makes the value concrete: **the graph
-guarantees what's safe to teach; the LLM makes it personal.**
+guarantees what's safe to teach; the LLM makes it personal.** Every panel reads the graph
+built from `words/` — no hard-coded word data.
 
 ```bash
-uv pip install -e ".[showcase]"                # adds streamlit (graphs via built-in Graphviz)
-export ANTHROPIC_API_KEY=sk-ant-...            # (or put it in .env) for LIVE lessons
-uv run rb-neo ingest --sample 30000            # broad corpus so common words appear
+docker compose up -d                           # Neo4j (skip if already running)
+uv venv && uv pip install -e ".[showcase]"     # core deps + streamlit + pyvis
+export ANTHROPIC_API_KEY=sk-ant-...            # (or put it in .env) for LIVE lessons; optional
+uv run rb-neo init                             # schema + curriculum DAG
+uv run rb-neo ingest --sample 30000            # random 30k of the corpus (raise it, or --limit 0 for all)
 uv run rb-neo synth                            # 4 synthetic kids with interests
 uv run streamlit run app/streamlit_app.py      # open http://localhost:8501
 ```
+
+`ingest` always also guarantees the curated decodable words and the multi-syllable
+**anatomy words** are loaded from `words/`, so every tab works regardless of what the random
+`--sample` drew. Use a bigger `--sample` (or `--limit 0` for the full corpus) for richer
+rhyme/minimal-pair structure — the demo above uses 30k to stay fast.
 
 Three tabs:
 - **🎯 Watch the graph decide** — the ZPD loop computed live *on the graph*, with the

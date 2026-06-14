@@ -114,8 +114,21 @@ def demo(
             )
             typer.echo("=" * 60)
 
+            # The headline recommendation: the ZPD over the curriculum DAG —
+            # unmastered skills whose prerequisites are ALL mastered, ranked by
+            # how many curated words each would unlock (matches the Streamlit app).
+            pool = recommend.zpd_pool(db, lid, limit=6)
+            typer.echo("ZPD — next skills (prerequisites met), ranked by words unlocked:")
+            for r in pool:
+                typer.echo(f"    {r['skill']:<6} +{r['unlocks']:<3} words   ({r['kind']})")
+            if pool:
+                target = pool[0]["skill"]
+                cw = recommend.cross_word(db, lid, target, limit=8)
+                typer.echo(f"i+1 practice words for the top skill '{target}':")
+                _print_rows(cw, "word")
+
             nbw = recommend.next_best_word(db, lid, limit=10)
-            typer.echo("Next-best words (introduce exactly ONE new grapheme):")
+            typer.echo("Raw next-best words (one new grapheme, ignoring prerequisites):")
             for r in nbw:
                 typer.echo(
                     f"    {r['word']:<14} + new '{r['introduces']}' ({r['introduces_type']})"

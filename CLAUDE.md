@@ -8,16 +8,26 @@ level) into a graph, overlays a per-learner mastery model (BKT), and serves a de
 **next-best-word** recommender. See `docs/research.md`, `docs/architecture.md`, `docs/build-plan.md`.
 
 ## Commands
+All word data comes from `words/*.json` (the real ~190k corpus); `RB_WORDS_DIR` overrides the dir.
 ```bash
-docker compose up -d                 # start Neo4j (browser http://localhost:7474)
-uv venv && uv pip install -e ".[dev]" # env + deps
-uv run rb-neo init                   # apply schema (constraints/indexes)
-uv run rb-neo ingest --limit 4000    # load words (omit limit / use --all for full)
-uv run rb-neo synth                  # create synthetic learners
-uv run rb-neo demo                   # run recommender scenarios
-uv run pytest -q                     # tests
+docker compose up -d                   # start Neo4j (browser http://localhost:7474)
+uv venv && uv pip install -e ".[dev]"  # core + dev deps  (use ".[showcase]" for the app)
+uv run rb-neo init                     # schema constraints/indexes + curriculum skill DAG
+uv run rb-neo ingest --limit 4000      # load words from words/ (--limit 0 = all; --sample N = random N)
+uv run rb-neo synth                    # create synthetic learners (mastery emerges via BKT)
+uv run rb-neo demo                     # run recommender scenarios
+uv run rb-neo browser-queries          # curated Cypher for Neo4j Browser (--markdown, --key NAME)
+uv run pytest -q                       # tests
 uv run ruff check src && uv run ruff format src
+
+# Showcase web app (the demo) — every step reads the graph loaded from words/:
+uv run rb-neo ingest --sample 30000    # broad random sample so common+anatomy words appear
+uv run rb-neo synth
+uv run streamlit run app/streamlit_app.py   # http://localhost:8501
 ```
+`ingest` always also guarantees the curated decodable words (`wordlists.COMMON_WORDS`) and the
+multi-syllable anatomy words (`wordlists.ANATOMY_WORDS`) are loaded from `words/`, so the showcase
+is reproducible regardless of what the random `--sample` happened to include.
 
 ## Architecture decisions
 - **Neo4j** is the right tool *because the value is in shared sub-word units*: 93 sounds, 39 phonemes,

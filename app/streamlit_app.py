@@ -11,10 +11,13 @@ with the real Cypher visible at every step:
      knows their rhyme families and minimal pairs,
   5. the LLM writes a personalized lesson from the graph-guaranteed safe set.
 
+Every panel reads the graph built from words/*.json — no hard-coded word data.
+
 Run:
+    docker compose up -d                       # Neo4j
     uv pip install -e ".[showcase]"
     export ANTHROPIC_API_KEY=sk-ant-...        # for live lessons (else offline preview)
-    uv run rb-neo init
+    uv run rb-neo init                         # schema + curriculum DAG
     uv run rb-neo ingest --sample 30000 && uv run rb-neo synth
     uv run streamlit run app/streamlit_app.py
 """
