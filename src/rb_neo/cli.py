@@ -7,7 +7,7 @@ from contextlib import contextmanager
 
 import typer
 
-from . import agent, recommend
+from . import agent, browser, recommend
 from .config import get_settings
 from .curriculum import apply_curriculum
 from .db import Neo4jDB, Neo4jUnavailable
@@ -159,6 +159,25 @@ def explain(
     typer.echo(f"Rationale    : {rec.rationale}")
     if rec.decodable_sentence:
         typer.echo(f"Sentence     : {rec.decodable_sentence}")
+
+
+@app.command(name="browser-queries")
+def browser_queries(
+    markdown: bool = typer.Option(
+        False, "--markdown", help="Emit docs/neo4j-queries.md content instead of terminal text."
+    ),
+    key: str = typer.Option("", help="Print only the query with this key (e.g. 'curriculum')."),
+) -> None:
+    """Print curated Cypher queries for exploring the graph in Neo4j Browser."""
+    queries = browser.BROWSER_QUERIES
+    if key:
+        queries = [q for q in queries if q.key == key]
+        if not queries:
+            keys = ", ".join(q.key for q in browser.BROWSER_QUERIES)
+            typer.secho(f"No query '{key}'. Available: {keys}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+    render = browser.render_markdown if markdown else browser.render_text
+    typer.echo(render(queries))
 
 
 @app.command()

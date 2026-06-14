@@ -78,6 +78,21 @@ Two tabs:
 > Without `ANTHROPIC_API_KEY`, lessons show a deterministic offline preview so the app still
 > runs (good for screenshots); set the key for live generation. Only synthetic data is sent.
 
+## Explore the graph directly (Neo4j Browser)
+
+The database ships with Neo4j Browser. With the stack running, open
+<http://localhost:7474> (log in with `NEO4J_USER` / `NEO4J_PASSWORD` from `.env`) and paste
+any curated query — the curriculum DAG, shared sub-word units, a learner's mastery overlay,
+the ZPD ripple, rhyme families, minimal pairs:
+
+```bash
+uv run rb-neo browser-queries                  # print all (copy-pasteable)
+uv run rb-neo browser-queries --key curriculum # just one
+```
+
+Full write-up with screenshots-worthy queries: [`docs/neo4j-queries.md`](docs/neo4j-queries.md)
+(generated from `rb_neo.browser` — the same set the CLI prints).
+
 ## Graph schema
 
 ```

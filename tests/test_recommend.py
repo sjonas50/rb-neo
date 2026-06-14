@@ -142,6 +142,28 @@ def test_skill_map_statuses_partition_curriculum(seeded) -> None:
 
 
 @requires_neo4j
+def test_browser_queries_all_execute(seeded) -> None:
+    """Every curated Browser query must run against a seeded graph and return rows."""
+    from rb_neo import browser
+
+    db = seeded
+    for q in browser.BROWSER_QUERIES:
+        rows = db.query(q.cypher)
+        assert rows, f"browser query '{q.key}' returned no rows"
+
+
+def test_browser_render_round_trips() -> None:
+    """Text and markdown renderers cover every query (no DB needed)."""
+    from rb_neo import browser
+
+    text = browser.render_text()
+    md = browser.render_markdown()
+    for q in browser.BROWSER_QUERIES:
+        assert q.title in text and q.title in md
+        assert q.cypher.splitlines()[0] in md
+
+
+@requires_neo4j
 def test_traverse_zpd_flow(seeded) -> None:
     from rb_neo import traverse
 
